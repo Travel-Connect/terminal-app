@@ -17,7 +17,7 @@ import * as os from "os";
 import * as path from "path";
 import type { ClickTarget, RegisterResult, Snapshot, ThemeSetting } from "../shared/types";
 import { seedDemo } from "./demo";
-import { createEventServer } from "./event-server";
+import { createEventServer, type EventServer } from "./event-server";
 import { mergeHooks, removeHooks } from "./hooks-manager";
 import { Logger } from "./logger";
 import { getDataDir } from "./paths";
@@ -44,6 +44,13 @@ if (demoMode && !process.env.TERMINAL_APP_DATA_DIR) {
 }
 
 const dataDir = getDataDir();
+
+// データディレクトリを差し替えた実行（検証・デモ）では Chromium プロファイル（userData）も隔離する。
+// 実稼働インスタンスとプロファイルを共有すると、2 個目以降の起動がプロファイルロックの競合で
+// ハング・大幅遅延しうる（検証スクリプトを実稼働アプリと並走させたときに顕在化）
+if (process.env.TERMINAL_APP_DATA_DIR) {
+  app.setPath("userData", path.join(dataDir, "electron-user-data"));
+}
 const logger = new Logger(dataDir);
 const projectStore = new ProjectStore(dataDir, logger);
 const stateStore = new StateStore();
@@ -106,23 +113,30 @@ if (!demoMode && capturePath === undefined) {
   }
 }
 
-const eventServer = createEventServer({
-  port: projectStore.config.port,
-  onEvent: (evt, receivedAt) => {
-    const result = stateStore.applyEvent(evt, projectStore.projects);
-    if (result === null) {
-      // design.md 10 章: 未登録 cwd・正常 SessionEnd は破棄してログのみ（UI は変えない）
-      logger.info(`event 破棄: ${evt.hook_event_name} cwd=${evt.cwd}`);
-      return;
-    }
-    const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
-    logger.info(
-      `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
-    );
-    broadcast(receivedAt);
-  },
-  logger,
-});
+// 受信サーバは projectStore.load() 後（whenReady 内）に生成する。
+// トップレベルで生成すると config.json 読み込み前の既定ポートを捕捉してしまい、
+// 「config.json の port 変更が反映されない」バグになる（2026-07-11 検証で発見・修正）
+let eventServer: EventServer | null = null;
+
+function createAppEventServer(): EventServer {
+  return createEventServer({
+    port: projectStore.config.port,
+    onEvent: (evt, receivedAt) => {
+      const result = stateStore.applyEvent(evt, projectStore.projects);
+      if (result === null) {
+        // design.md 10 章: 未登録 cwd・正常 SessionEnd は破棄してログのみ（UI は変えない）
+        logger.info(`event 破棄: ${evt.hook_event_name} cwd=${evt.cwd}`);
+        return;
+      }
+      const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
+      logger.info(
+        `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
+      );
+      broadcast(receivedAt);
+    },
+    logger,
+  });
+}
 
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
 function registerProject(dirPath: string): RegisterResult {
@@ -304,20 +318,27 @@ void app.whenReady().then(async () => {
     }
   }
 
+  // design.md 10 章「UI は起動継続」: 先にウィンドウを表示し、listen 失敗時は
+  // ステータス表示＋エラーダイアログで設定変更を案内する（ダイアログはモーダルで
+  // メインプロセスを止めるため、ウィンドウ表示前に出すと起動自体が固まる）
+  wireIpc();
+  createWindow();
+
+  eventServer = createAppEventServer();
   try {
     await eventServer.listen();
   } catch (e) {
-    // design.md 10 章: 受信ポート使用中 → エラーダイアログ＋設定変更の案内（UI は起動継続）
     logger.error(`受信サーバの起動に失敗: ${String(e)}`);
-    dialog.showErrorBox(
-      "受信ポートを開けません",
-      `ポート ${projectStore.config.port} を使用できません。\n` +
-        `%APPDATA%\\terminal-app\\config.json の "port" を変更して再起動してください。\n\n詳細: ${String(e)}`
-    );
+    setStatus(`受信ポート ${projectStore.config.port} を開けません（config.json の "port" を変更して再起動してください）`);
+    // 自動キャプチャ実行（検証・証跡採取）ではモーダルを出さない（無人実行がハングするため）
+    if (capturePath === undefined) {
+      dialog.showErrorBox(
+        "受信ポートを開けません",
+        `ポート ${projectStore.config.port} を使用できません。\n` +
+          `%APPDATA%\\terminal-app\\config.json の "port" を変更して再起動してください。\n\n詳細: ${String(e)}`
+      );
+    }
   }
-
-  wireIpc();
-  createWindow();
 });
 
 app.on("window-all-closed", () => {
@@ -325,6 +346,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  void eventServer.close();
+  void eventServer?.close();
   logger.info("terminal-app 終了");
 });
