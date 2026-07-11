@@ -5,8 +5,12 @@
 
 export type ClickTarget = "cursor" | "terminal";
 
-/** 内部状態 = 待機（補助状態）＋確定 4 状態（design.md 5.1） */
-export type SessionState = "waiting" | "running" | "done" | "confirm" | "error";
+/**
+ * 内部状態 = 待機（補助状態）＋確定 4 状態（design.md 5.1）＋切断（260712_2）。
+ * 切断 = 「実行中」なのに transcript の更新が途絶し（ウィンドウ消失を併用判定）、
+ * SessionEnd も届いていないセッション。liveness-monitor が検知して遷移させる。
+ */
+export type SessionState = "waiting" | "running" | "done" | "confirm" | "error" | "disconnected";
 
 export type ThemeSetting = "light" | "dark" | "auto";
 
@@ -39,6 +43,18 @@ export interface SessionView {
   /** 「実行中」へ遷移した時刻（epoch ms）。経過時間表示の起点（design.md 5.1） */
   runningSince?: number;
   lastMessage?: string;
+  /**
+   * 現在の作業テキスト（260712 課題B）。UserPromptSubmit hook の prompt（実データ）を整形した値。
+   * ターミナルのオレンジ表示（スピナー行）そのものは hook / transcript に載らないため、
+   * 「このセッションに何をやらせているか」を示す最も新しい実データとして prompt を用いる
+   * （260712_3: TaskCreated の task_subject でも更新される）。
+   */
+  workText?: string;
+  /**
+   * statusLine 転送由来の作業メトリクス（260712_3 案A）。
+   * 例「↓ 70.5k tokens · thinking xhigh」。取得不能・未転送時は undefined（非表示）。
+   */
+  statsText?: string;
 }
 
 /** ステータスバー件数（REQ-10 / design.md 5.2） */
@@ -47,6 +63,8 @@ export interface StatusCounts {
   done: number;
   confirm: number;
   error: number;
+  /** 切断セッション数（260712_2）。既存テスト・呼び出し側との互換のためオプショナル（未設定 = 0 扱い） */
+  disconnected?: number;
   /** 表示中セッション数（プロジェクトごとに 1 つ。待機タイルは数えない） */
   total: number;
 }
@@ -91,6 +109,8 @@ export interface TerminalAppApi {
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
   focusProject(id: string): Promise<FocusResult>;
+  /** タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除） */
+  showTileMenu(id: string): Promise<void>;
   windowAction(action: "minimize" | "maximize" | "close"): void;
   /** NFR-01 計測用: スナップショット描画完了を main へ通知（受信→描画のログ差分計測） */
   notifyRendered(revision: number): void;

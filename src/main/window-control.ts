@@ -169,6 +169,18 @@ export function listTopLevelWindows(): TopLevelWindow[] {
   return enumWindows(api).map((w) => ({ title: w.title, exe: w.exe }));
 }
 
+/**
+ * 対象プロジェクトのウィンドウが一覧に存在するか（切断検知の補助シグナル。260712_2）。
+ * 探索条件は focusProjectWindow と同一（exe 名 ＋ タイトルに folder 名。design.md 7.1）。
+ * タイトル一致はヒューリスティックのため偽陰性がある（タブ切替でタイトルが変わる等）—
+ * 呼び出し側（liveness-monitor）は「消失」を単独の切断根拠にしないこと。
+ */
+export function hasWindowFor(target: ClickTarget, folderName: string, windows: readonly TopLevelWindow[]): boolean {
+  const wanted = TARGET_EXES[target];
+  const needle = folderName.toLowerCase();
+  return windows.some((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+}
+
 function isForeground(api: Win32Api, hwnd: any): boolean {
   try {
     const fg = api.GetForegroundWindow();

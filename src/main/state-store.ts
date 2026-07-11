@@ -2,15 +2,20 @@
  * ② 状態ストア（design.md 5 章 / REQ-03, REQ-04, REQ-08, REQ-10）。
  * - イベント受信スキーマ検証（design.md 4.8）
  * - イベント → 4 状態マッピング（design.md 4.3 / 4.8）
- * - 状態遷移（design.md 5.1）・複数セッションの直近イベント優先（design.md 5.2）
+ * - 状態遷移（design.md 5.1）・複数セッションの表示選定は「実行中」優先＋直近イベント
+ *   （design.md 5.2 を 260712 課題A で改訂。preferForDisplay 参照）
  * - cwd → プロジェクト対応付け: 最長一致プレフィックス（design.md 4.7）
  * - セッション状態は揮発（アプリ再起動で全タイル「待機」へ。design.md 5.1）
  */
 import { EventEmitter } from "events";
 import type { Project, SessionState, SessionView, StatusCounts } from "../shared/types";
 
-/** 受理するイベント名（design.md 4.8）。UserPromptSubmit は自動追記対象（OPEN-04 案 A 採用）、SessionEnd は受信側のみ対応（OPEN-03） */
-export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd"] as const;
+/**
+ * 受理するイベント名（design.md 4.8）。UserPromptSubmit は自動追記対象（OPEN-04 案 A 採用）、
+ * SessionEnd は受信側のみ対応（OPEN-03）。TaskCreated はタスク作成タイトルの取得経路（260712_3 —
+ * 実 claude 2.1.207 の hook stdin ダンプで payload を実測確認済み）。
+ */
+export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd", "TaskCreated"] as const;
 export type HookEventName = (typeof ACCEPTED_EVENT_NAMES)[number];
 
 export interface HookEvent {
@@ -20,6 +25,10 @@ export interface HookEvent {
   message?: string;
   reason?: string;
   transcript_path?: string;
+  /** UserPromptSubmit のみ: 送信されたプロンプト本文（現在の作業テキストの実データ源。260712 課題B） */
+  prompt?: string;
+  /** TaskCreated のみ: 作成されたタスクの件名（作業テキストの実データ源。260712_3） */
+  task_subject?: string;
 }
 
 /** SessionEnd の正常終了 reason（design.md 4.8。これ以外・欠落は「エラー相当」と判定する） */
@@ -53,7 +62,24 @@ export function validateEvent(payload: unknown): ValidationResult {
   if (typeof p.message === "string") event.message = p.message;
   if (typeof p.reason === "string") event.reason = p.reason;
   if (typeof p.transcript_path === "string") event.transcript_path = p.transcript_path;
+  if (typeof p.prompt === "string") event.prompt = p.prompt;
+  if (typeof p.task_subject === "string") event.task_subject = p.task_subject;
   return { ok: true, event };
+}
+
+/** タイルに表示する作業テキストの最大文字数（超過分は「…」で省略。260712 課題B） */
+export const WORK_TEXT_MAX = 80;
+
+/**
+ * prompt → タイル表示用の作業テキスト整形（260712 課題B）。
+ * 改行・連続空白を単一スペースへ畳み、WORK_TEXT_MAX 文字で省略する。
+ * 空・空白のみは undefined（呼び出し側は既存値を維持、UI 側は非表示フォールバック）。
+ */
+export function extractWorkText(prompt: string | undefined): string | undefined {
+  if (prompt === undefined) return undefined;
+  const collapsed = prompt.replace(/\s+/g, " ").trim();
+  if (collapsed === "") return undefined;
+  return collapsed.length > WORK_TEXT_MAX ? collapsed.slice(0, WORK_TEXT_MAX) + "…" : collapsed;
 }
 
 /**
@@ -73,6 +99,7 @@ export function classifyNotification(message: string | undefined): "permission" 
  * - Stop → 完了（無条件）
  * - Notification → 確認待ち（message 種別によらず安全側に倒す）
  * - UserPromptSubmit → 実行中（OPEN-04 案 A 採用 — 2026-07-11。hooks へ自動追記される。design.md 4.1 / 4.5）
+ * - TaskCreated → 実行中（タスク作成は作業中にしか起きない。260712_3）
  * - SessionEnd → 正常終了 reason なら null（状態を変えず破棄・ログのみ）、それ以外は「エラー」（OPEN-03 の検知できた範囲）
  */
 export function mapEventToState(evt: HookEvent): SessionState | null {
@@ -82,6 +109,7 @@ export function mapEventToState(evt: HookEvent): SessionState | null {
     case "Notification":
       return "confirm";
     case "UserPromptSubmit":
+    case "TaskCreated":
       return "running";
     case "SessionEnd":
       return evt.reason !== undefined && NORMAL_END_REASONS.has(evt.reason) ? null : "error";
@@ -120,12 +148,33 @@ interface SessionRec {
   lastEventAt: number;
   runningSince?: number;
   lastMessage?: string;
+  workText?: string;
+  /** transcript JSONL の実パス（hook payload 由来）。切断検知（liveness-monitor）の監視対象（260712_2） */
+  transcriptPath?: string;
+  /** statusLine 転送由来の作業メトリクス表示（例「↓ 70.5k tokens · thinking xhigh」。260712_3 案A） */
+  statsText?: string;
+}
+
+/**
+ * 表示セッションの優先判定（260712 課題A）: candidate を current より優先するか。
+ * 「実行中」＞ 非実行中。同順位なら最終イベント時刻が新しい（同時刻含む）方を採る。
+ */
+function preferForDisplay(candidate: SessionRec, current: SessionView): boolean {
+  const candidateRunning = candidate.state === "running";
+  const currentRunning = current.state === "running";
+  if (candidateRunning !== currentRunning) return candidateRunning;
+  return candidate.lastEventAt >= current.lastEventAt;
 }
 
 export interface ApplyResult {
   projectId: string;
   sessionId: string;
   state: SessionState;
+  /**
+   * 正常 SessionEnd により「実行中」のまま終了したセッションの記録を破棄したとき true（260712 課題A）。
+   * 破棄しないと、実行中優先表示（displaySessions）が終了済みセッションを「実行中」として固定し続ける。
+   */
+  discardedRunning?: boolean;
 }
 
 /**
@@ -148,7 +197,19 @@ export class StateStore extends EventEmitter {
     if (project === null) return null; // 破棄してログのみ（design.md 10 章）
 
     const mapped = mapEventToState(evt);
-    if (mapped === null) return null; // 正常 SessionEnd: 状態を変えない
+    if (mapped === null) {
+      // 正常 SessionEnd: 表示状態は変えない（design.md 4.8）。ただし「実行中」のまま
+      // 終了したセッション（中断→終了で Stop が来ないケース）の記録は破棄する。
+      // 保持し続けると、実行中優先表示（260712 課題A の修正）が実在しない
+      // 「実行中」を表示し続けてしまうため（幽霊実行中の防止）。
+      const existing = this.sessions.get(evt.session_id);
+      if (existing !== undefined && existing.state === "running") {
+        this.sessions.delete(evt.session_id);
+        this.emit("changed");
+        return { projectId: existing.projectId, sessionId: evt.session_id, state: existing.state, discardedRunning: true };
+      }
+      return null;
+    }
 
     const t = this.now();
     const existing = this.sessions.get(evt.session_id);
@@ -168,7 +229,19 @@ export class StateStore extends EventEmitter {
     rec.state = mapped;
     rec.lastEventAt = t;
     rec.projectId = project.id;
+    // 切断検知（260712_2）用: transcript の実パスを保持（イベントに載っていれば常に最新へ更新）
+    if (evt.transcript_path !== undefined) rec.transcriptPath = evt.transcript_path;
     if (evt.hook_event_name === "Notification") rec.lastMessage = evt.message;
+    if (evt.hook_event_name === "UserPromptSubmit") {
+      // 現在の作業テキスト（260712 課題B）: prompt が取れたときのみ更新（空は既存値を維持）
+      const work = extractWorkText(evt.prompt);
+      if (work !== undefined) rec.workText = work;
+    }
+    if (evt.hook_event_name === "TaskCreated") {
+      // 作業テキストの更新（260712_3）: タスク件名はプロンプト全文より「いま何をやっているか」に近い
+      const work = extractWorkText(evt.task_subject);
+      if (work !== undefined) rec.workText = work;
+    }
 
     this.sessions.set(evt.session_id, rec);
     this.emit("changed");
@@ -176,14 +249,21 @@ export class StateStore extends EventEmitter {
   }
 
   /**
-   * プロジェクトごとの表示セッション（design.md 5.2: 最終イベント時刻が最新のセッション）。
+   * プロジェクトごとの表示セッション。
+   * 選定規則（design.md 5.2 改訂 — 260712 課題A）: 「実行中」セッションを最優先し、
+   * 同順位の中では最終イベント時刻が最新のものを表示する。
+   *
+   * 旧規則（無条件で最終イベント優先）では、同一プロジェクトで複数セッションが並行する場合
+   * （サブエージェント・ヘッドレス claude -p・検証スクリプト等が同じ cwd で走るケース）に、
+   * 短命セッションの Stop（完了）が、まだ動作継続中のセッションを覆い隠して
+   * 「完了なのに実際は動いている」誤表示になっていた（実ログ 2026-07-11T14:26 の再現痕跡あり）。
    * イベント未受信のプロジェクトは含まれない（= UI 側で「待機」タイル表示）。
    */
   displaySessions(projects: readonly Project[]): Record<string, SessionView> {
     const result: Record<string, SessionView> = {};
     for (const rec of this.sessions.values()) {
       const cur = result[rec.projectId];
-      if (cur === undefined || rec.lastEventAt >= cur.lastEventAt) {
+      if (cur === undefined || preferForDisplay(rec, cur)) {
         result[rec.projectId] = { ...rec };
       }
     }
@@ -198,12 +278,84 @@ export class StateStore extends EventEmitter {
   /** ステータスバー件数（design.md 5.2: 表示中セッションを数える。待機タイルは数えない） */
   counts(projects: readonly Project[]): StatusCounts {
     const c: StatusCounts = { running: 0, done: 0, confirm: 0, error: 0, total: 0 };
+    let disconnected = 0;
     const views = this.displaySessions(projects);
     for (const v of Object.values(views)) {
       c.total += 1;
-      if (v.state !== "waiting") c[v.state] += 1; // 表示セッションはイベント由来のため waiting は来ない
+      if (v.state === "waiting") continue; // 表示セッションはイベント由来のため waiting は来ない
+      if (v.state === "disconnected") {
+        disconnected += 1;
+        continue;
+      }
+      c[v.state] += 1;
     }
+    // disconnected キーは 1 件以上のときだけ付ける（0 件時の形を従来と同一に保ち、既存の期待値と互換にする）
+    if (disconnected > 0) c.disconnected = disconnected;
     return c;
+  }
+
+  /**
+   * 「実行中」セッションが実際に切断（transcript 更新途絶＋ウィンドウ消失）していたときの遷移（260712_2）。
+   * 呼び出し元は liveness-monitor の掃引。running 以外には適用しない（イベント由来の確定状態を上書きしない）。
+   * lastEventAt は検知時刻に更新する（タイルの「切断・N分前」の起点 = 検知時点）。
+   */
+  markDisconnected(sessionId: string): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "running") return false;
+    rec.state = "disconnected";
+    rec.runningSince = undefined;
+    rec.lastEventAt = this.now();
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * 再接続（260712_2）: transcript 走査で見つかった動作中セッションを「実行中」として復元する。
+   * hook イベントの方が新しい記録を持つ場合（lastEventAt がより新しい）は上書きしない —
+   * 走査結果は「transcript の最終更新時点」の情報であり、イベント由来の状態が常に優先。
+   */
+  reviveSession(info: { sessionId: string; projectId: string; lastEventAt: number; transcriptPath: string; workText?: string }): boolean {
+    const existing = this.sessions.get(info.sessionId);
+    if (existing !== undefined && existing.lastEventAt >= info.lastEventAt && existing.state !== "disconnected") return false;
+    this.sessions.set(info.sessionId, {
+      sessionId: info.sessionId,
+      projectId: info.projectId,
+      state: "running",
+      lastEventAt: info.lastEventAt,
+      runningSince: info.lastEventAt,
+      transcriptPath: info.transcriptPath,
+      workText: info.workText ?? existing?.workText,
+    });
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * statusLine 転送のメトリクス表示を更新する（260712_3 案A）。
+   * 状態遷移・lastEventAt には一切触れない — statusline はアイドル中（入力待ち）にも
+   * 発火するため、「実行中」への遷移根拠にすると誤表示になる。
+   * 未知のセッションは破棄（hook イベントでタイルが確立してから載る）。
+   * 戻り値: 表示値が実際に変わったとき true（呼び出し側の broadcast 抑制用。
+   * statusline は最大 300ms 間隔で来るため、値が同じ間は再描画しない）。
+   */
+  applyStatusStats(sessionId: string, statsText: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || statsText === undefined) return false;
+    if (rec.statsText === statsText) return false;
+    rec.statsText = statsText;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 切断検知の掃引対象 = 「実行中」セッション一覧（liveness-monitor 用。260712_2） */
+  runningSessions(): Array<{ sessionId: string; projectId: string; transcriptPath?: string }> {
+    const out: Array<{ sessionId: string; projectId: string; transcriptPath?: string }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.state === "running") {
+        out.push({ sessionId: rec.sessionId, projectId: rec.projectId, transcriptPath: rec.transcriptPath });
+      }
+    }
+    return out;
   }
 
   /**

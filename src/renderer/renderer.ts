@@ -39,12 +39,16 @@ const STATE_META: Record<SessionState, { label: string; icon: string; cls: strin
   done: { label: "完了", icon: "✓", cls: "state-done" }, // ✓
   confirm: { label: "確認待ち", icon: "?", cls: "state-confirm" },
   error: { label: "エラー", icon: "⚠", cls: "state-error" }, // ⚠
+  disconnected: { label: "切断", icon: "⊘", cls: "state-disconnected" }, // 260712_2: SessionEnd 不達のまま更新途絶
 };
 
 function tileStatusText(session: SessionView | undefined): string {
   if (session === undefined) return "待機・イベント待ち";
   if (session.state === "running") {
-    return session.runningSince !== undefined ? fmtElapsed(Date.now() - session.runningSince) : "実行中";
+    const elapsed = session.runningSince !== undefined ? fmtElapsed(Date.now() - session.runningSince) : "実行中";
+    // statusLine 転送のメトリクス（260712_3 案A: 「↓ 70.5k tokens · thinking xhigh」相当）を併記。
+    // 未転送・取得不能時は経過時間のみ（フォールバック）
+    return session.statsText !== undefined && session.statsText !== "" ? `${elapsed} · ${session.statsText}` : elapsed;
   }
   const meta = STATE_META[session.state];
   return `${meta.label}・${fmtRelative(Date.now() - session.lastEventAt)}`;
@@ -91,14 +95,24 @@ function createTile(project: Project): HTMLButtonElement {
   spinner.className = "tile-spinner";
   const icon = document.createElement("span");
   icon.className = "tile-icon";
+  // 現在の作業テキスト（260712 課題B: UserPromptSubmit の prompt 由来。未取得時は非表示）
+  const work = document.createElement("span");
+  work.className = "tile-work";
+  work.hidden = true;
   const status = document.createElement("span");
   status.className = "tile-status";
-  center.append(spinner, icon);
+  center.append(spinner, icon, work);
   el.append(glow, name, center, status);
 
   el.addEventListener("click", () => {
     // クリックで前面化（REQ-05）。失敗メッセージは main からステータスバーへ届く
     void api.focusProject(project.id);
+  });
+  el.addEventListener("contextmenu", (e) => {
+    // 右クリック = プロジェクト操作メニュー（260712_2: 再接続・表示クリア・登録解除）。
+    // メニュー本体は main 側のネイティブ Menu（クリック確定処理も main が持つ）
+    e.preventDefault();
+    void api.showTileMenu(project.id);
   });
   return el;
 }
@@ -131,6 +145,11 @@ function renderGrid(): void {
     if (nameEl.textContent !== project.name) nameEl.textContent = project.name;
     const icon = STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
+    // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）
+    const workEl = el.querySelector(".tile-work") as HTMLElement;
+    const work = session?.workText ?? "";
+    if (workEl.textContent !== work) workEl.textContent = work;
+    workEl.hidden = work === "";
     updateTileStatus(el, session);
   }
   // 登録解除されたタイルを取り除く

@@ -11,19 +11,22 @@
  *   --theme=<t>          テーマの一時上書き（light / dark / auto。ライトモード証跡用）
  *   --view=settings      設定画面を初期表示で開く（面 1d / 1f の証跡用）
  */
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, RegisterResult, Snapshot, ThemeSetting } from "../shared/types";
+import type { ClickTarget, OpResult, RegisterResult, Snapshot, ThemeSetting } from "../shared/types";
 import { seedDemo } from "./demo";
-import { createEventServer, type EventServer } from "./event-server";
-import { mergeHooks, removeHooks } from "./hooks-manager";
+import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
+import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
+import { DISCONNECT_CHECK_INTERVAL_MS, findDisconnected } from "./liveness-monitor";
 import { Logger } from "./logger";
 import { getDataDir } from "./paths";
 import { ProjectStore, validateProjectDir } from "./project-store";
+import { scanLiveSessions } from "./session-scan";
+import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { classifyNotification, StateStore } from "./state-store";
-import { focusProjectWindow } from "./window-control";
+import { focusProjectWindow, hasWindowFor, isAvailable as windowApiAvailable, listTopLevelWindows, type TopLevelWindow } from "./window-control";
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -120,7 +123,9 @@ let eventServer: EventServer | null = null;
 
 function createAppEventServer(): EventServer {
   return createEventServer({
-    port: projectStore.config.port,
+    // デモ実行は hooks を書かず受信も不要のため空きポート（0）で listen し、
+    // 実稼働インスタンス（既定 41321）と並走しても EADDRINUSE を起こさない（260712 課題C）
+    port: demoMode ? 0 : projectStore.config.port,
     onEvent: (evt, receivedAt) => {
       const result = stateStore.applyEvent(evt, projectStore.projects);
       if (result === null) {
@@ -128,14 +133,86 @@ function createAppEventServer(): EventServer {
         logger.info(`event 破棄: ${evt.hook_event_name} cwd=${evt.cwd}`);
         return;
       }
-      const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
-      logger.info(
-        `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
-      );
+      if (result.discardedRunning === true) {
+        // 正常 SessionEnd: 実行中のまま終了したセッションの記録を破棄（260712 課題A の幽霊実行中防止）
+        logger.info(`event 受信: SessionEnd（正常終了）→ 実行中セッションの記録を破棄 (project=${result.projectId}, session=${result.sessionId})`);
+      } else {
+        const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
+        logger.info(
+          `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
+        );
+      }
       broadcast(receivedAt);
+    },
+    // statusLine 転送（260712_3 案A）: メトリクスをタイルへ反映し、整形テキストを
+    // レスポンス本文として返す（curl 経由でそのままターミナルの statusline 表示になる）。
+    // 高頻度（最大 300ms 間隔）のため、表示値が変わったときだけ broadcast する。
+    onStatusLine: (payload) => {
+      const metrics = parseStatusLinePayload(payload);
+      if (metrics === null) return null;
+      const text = fmtStats(metrics);
+      if (stateStore.applyStatusStats(metrics.sessionId, text)) broadcast();
+      return text ?? null;
     },
     logger,
   });
+}
+
+/* ---------------- 切断検知（260712_2） ---------------- */
+
+let livenessTimer: NodeJS.Timeout | null = null;
+
+function statMtimeMs(p: string): number | null {
+  try {
+    return fs.statSync(p).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** 切断トースト（260712_2）。通知音は REQ-12（次期）まで鳴らさない = silent 固定 */
+function showDisconnectToast(projectName: string): void {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({
+    title: `${projectName}: セッションが切断されました`,
+    body: "終了の合図が届かないまま更新が止まりました。タイル右クリック →「再接続」で拾い直せます。",
+    silent: true,
+  });
+  n.on("click", () => {
+    if (win === null) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+  n.show();
+}
+
+/**
+ * 1 掃引: 実行中セッションの transcript 更新時刻とウィンドウ存在を確認し、
+ * 切断と判定されたものを「切断」状態へ遷移 ＋ トースト通知する。
+ * ウィンドウ列挙（EnumWindows）は 1 掃引につき最大 1 回に抑える（遅延取得）。
+ */
+function sweepLiveness(): void {
+  const targets = stateStore.runningSessions();
+  if (targets.length === 0) return;
+  let windows: TopLevelWindow[] | null = null;
+  const windowPresent = (projectId: string): boolean | null => {
+    const project = projectStore.getProject(projectId);
+    if (project === null || !windowApiAvailable()) return null; // 判定不能 → liveness-monitor 側で安全側に扱う
+    if (windows === null) windows = listTopLevelWindows();
+    return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
+  };
+  const hits = findDisconnected(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, windowPresent });
+  let changed = false;
+  for (const t of hits) {
+    if (!stateStore.markDisconnected(t.sessionId)) continue;
+    changed = true;
+    const project = projectStore.getProject(t.projectId);
+    const name = project?.name ?? t.projectId;
+    logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶`);
+    showDisconnectToast(name);
+  }
+  if (changed) broadcast();
 }
 
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
@@ -146,19 +223,100 @@ function registerProject(dirPath: string): RegisterResult {
   if (!valid.ok) {
     return { ok: false, path: dirPath, error: valid.error };
   }
-  const merged = mergeHooks(dirPath, projectStore.config.port);
+  const merged = mergeHooks(dirPath, projectStore.config.port, ALL_HOOK_EVENTS);
   if (!merged.ok) {
     // design.md 3.2(a) 失敗時: settings.json に書き込まず、登録も行わない
     logger.error(`hooks マージ失敗のため登録中止: ${dirPath} — ${merged.error}`);
     return { ok: false, path: dirPath, error: merged.error };
   }
+  // statusLine 転送（260712_3 案A）は付加機能のため、失敗しても登録は続行する（ログのみ）
+  const sl = mergeStatusLine(dirPath, projectStore.config.port);
+  if (!sl.ok) logger.warn(`statusLine 設定失敗（登録は続行）: ${dirPath} — ${sl.error}`);
+  else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${dirPath}`);
   const added = projectStore.addProject(dirPath);
   if (!added.ok || added.project === undefined) {
-    removeHooks(dirPath); // 追加に失敗したらマージを巻き戻す
+    removeHooks(dirPath, ALL_HOOK_EVENTS); // 追加に失敗したらマージを巻き戻す
+    removeStatusLine(dirPath);
     return { ok: false, path: dirPath, error: added.error };
   }
-  logger.info(`プロジェクト登録: ${dirPath} (hooks 書込=${merged.changed})`);
+  logger.info(`プロジェクト登録: ${dirPath} (hooks 書込=${merged.changed}, statusLine=${sl.skipped === true ? "skip" : String(sl.changed)})`);
   return { ok: true, path: dirPath, projectId: added.project.id };
+}
+
+/** 登録解除の本体（設定画面の IPC と右クリックメニューの両方から呼ぶ。260712_2 でハンドラから抽出） */
+function unregisterProjectById(id: string): OpResult {
+  const project = projectStore.getProject(id);
+  if (project === null) return { ok: false, error: "プロジェクトが見つかりません" };
+  const removed = removeHooks(project.path, ALL_HOOK_EVENTS);
+  if (!removed.ok) {
+    // design.md 4.2 除去: パース失敗時は中断（手動対応を促す）。登録は残す
+    logger.error(`hooks 除去失敗: ${project.path} — ${removed.error}`);
+    setStatus(`hooks を除去できません（手動確認が必要）: ${removed.error ?? ""}`);
+    return { ok: false, error: removed.error };
+  }
+  const slRemoved = removeStatusLine(project.path);
+  if (!slRemoved.ok) logger.warn(`statusLine 除去失敗（解除は続行）: ${project.path} — ${slRemoved.error}`);
+  projectStore.removeProject(id);
+  stateStore.removeProjectSessions(id); // 解除済みプロジェクトのセッションを保持し続けない（メモリ整理）
+  logger.info(`プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed}, statusLine 除去=${slRemoved.changed})`);
+  broadcast();
+  return { ok: true };
+}
+
+/**
+ * 再接続（260712_2）: transcript 走査で「直近まで動いていた」セッションを復元する。
+ * アプリ再起動（セッションは揮発）後や切断誤検知からの復帰の手動導線。
+ */
+function reconnectProject(id: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  const found = scanLiveSessions(project.path);
+  let revived = 0;
+  for (const s of found) {
+    const ok = stateStore.reviveSession({
+      sessionId: s.sessionId,
+      projectId: id,
+      lastEventAt: s.mtimeMs,
+      transcriptPath: s.transcriptPath,
+      workText: s.workText,
+    });
+    if (ok) revived += 1;
+  }
+  logger.info(`再接続: ${project.name} — 走査 ${found.length} 件 / 復元 ${revived} 件`);
+  setStatus(
+    revived > 0
+      ? `再接続: ${project.name} のセッション ${revived} 件を復元しました`
+      : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
+  );
+}
+
+/** 表示クリア（260712_2）: タイルのセッション表示のみ消す（登録・hooks は維持。次のイベントで再表示される） */
+function clearProjectDisplay(id: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  stateStore.removeProjectSessions(id);
+  logger.info(`表示クリア: ${project.name}`);
+  setStatus(`${project.name} の表示をクリアしました`);
+}
+
+/** 登録解除は hooks 除去を伴う破壊的操作のため、メニューからは確認を挟む（260712_2） */
+async function confirmAndUnregister(id: string): Promise<void> {
+  const project = projectStore.getProject(id);
+  if (project === null || win === null) return;
+  const { response } = await dialog.showMessageBox(win, {
+    type: "warning",
+    title: "登録解除",
+    message: `${project.name} を登録解除しますか？`,
+    detail: `タイルを削除し、${project.path} の .claude/settings.json から本アプリの hooks を除去します。`,
+    buttons: ["登録解除", "キャンセル"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response === 0) {
+    const result = unregisterProjectById(id);
+    if (!result.ok && result.error !== undefined) setStatus(result.error);
+  }
 }
 
 function wireIpc(): void {
@@ -170,21 +328,19 @@ function wireIpc(): void {
     return results;
   });
 
-  ipcMain.handle("unregister-project", (_e, id: string) => {
+  ipcMain.handle("unregister-project", (_e, id: string) => unregisterProjectById(id));
+
+  // タイル右クリックメニュー（260712_2）。ネイティブ Menu を popup し、確定処理は main 側で完結する
+  ipcMain.handle("show-tile-menu", (_e, id: string) => {
     const project = projectStore.getProject(id);
-    if (project === null) return { ok: false, error: "プロジェクトが見つかりません" };
-    const removed = removeHooks(project.path);
-    if (!removed.ok) {
-      // design.md 4.2 除去: パース失敗時は中断（手動対応を促す）。登録は残す
-      logger.error(`hooks 除去失敗: ${project.path} — ${removed.error}`);
-      setStatus(`hooks を除去できません（手動確認が必要）: ${removed.error ?? ""}`);
-      return { ok: false, error: removed.error };
-    }
-    projectStore.removeProject(id);
-    stateStore.removeProjectSessions(id); // 解除済みプロジェクトのセッションを保持し続けない（メモリ整理）
-    logger.info(`プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed})`);
-    broadcast();
-    return { ok: true };
+    if (project === null || win === null) return;
+    const menu = Menu.buildFromTemplate([
+      { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
+      { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
+      { type: "separator" },
+      { label: "登録解除（hooks も除去）…", click: () => { void confirmAndUnregister(id); } },
+    ]);
+    menu.popup({ window: win });
   });
 
   ipcMain.handle("set-click-target", (_e, id: string, target: ClickTarget) => {
@@ -300,6 +456,8 @@ function createWindow(): void {
 
 void app.whenReady().then(async () => {
   if (secondInstance) return; // 多重起動側: quit 完了を待つだけ（サーバ listen もウィンドウ生成もしない）
+  // Windows のトースト通知（切断お知らせ。260712_2）は AppUserModelID が無いと表示されないことがある
+  app.setAppUserModelId("terminal-app");
   logger.info(`terminal-app 起動 (dataDir=${dataDir}, demo=${demoMode})`);
   projectStore.load();
 
@@ -312,9 +470,14 @@ void app.whenReady().then(async () => {
     // 旧 2 イベント（Stop / Notification）構成で登録済みのプロジェクトにも、
     // 再登録なしで UserPromptSubmit（OPEN-04 案 A）が行き渡る。ポート変更後の再追記も同経路。
     for (const p of projectStore.projects) {
-      const r = mergeHooks(p.path, projectStore.config.port);
+      const r = mergeHooks(p.path, projectStore.config.port, ALL_HOOK_EVENTS);
       if (!r.ok) logger.warn(`hooks 追補失敗: ${p.path} — ${r.error}`);
       else if (r.changed) logger.info(`hooks を追補（不足イベントの追記/再追記）: ${p.path}`);
+      // statusLine 転送（260712_3 案A）も同経路で追補（既存プロジェクトへ再登録なしで行き渡る）
+      const sl = mergeStatusLine(p.path, projectStore.config.port);
+      if (!sl.ok) logger.warn(`statusLine 追補失敗: ${p.path} — ${sl.error}`);
+      else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${p.path}`);
+      else if (sl.changed) logger.info(`statusLine 転送を追補: ${p.path}`);
     }
   }
 
@@ -324,20 +487,27 @@ void app.whenReady().then(async () => {
   wireIpc();
   createWindow();
 
-  eventServer = createAppEventServer();
+  const server = createAppEventServer();
+  eventServer = server;
   try {
-    await eventServer.listen();
+    await server.listen();
   } catch (e) {
-    logger.error(`受信サーバの起動に失敗: ${String(e)}`);
-    setStatus(`受信ポート ${projectStore.config.port} を開けません（config.json の "port" を変更して再起動してください）`);
+    // 表示するポートは「実際に bind を試みたポート」を正とする（260712 課題C:
+    // 旧実装は設定値 projectStore.config.port を表示しており、実試行ポートと食い違う
+    // ダイアログ（表示 41999 / 実 bind 41321）を出していた）
+    const attemptedPort = resolveAttemptedPort(e, server.targetPort);
+    const text = buildListenErrorText(e, attemptedPort);
+    logger.error(`受信サーバの起動に失敗 (port=${attemptedPort}): ${String(e)}`);
+    setStatus(text.status);
     // 自動キャプチャ実行（検証・証跡採取）ではモーダルを出さない（無人実行がハングするため）
     if (capturePath === undefined) {
-      dialog.showErrorBox(
-        "受信ポートを開けません",
-        `ポート ${projectStore.config.port} を使用できません。\n` +
-          `%APPDATA%\\terminal-app\\config.json の "port" を変更して再起動してください。\n\n詳細: ${String(e)}`
-      );
+      dialog.showErrorBox(text.title, text.body);
     }
+  }
+
+  // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
+  if (!demoMode) {
+    livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
   }
 });
 
@@ -346,6 +516,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  if (livenessTimer !== null) clearInterval(livenessTimer);
   void eventServer?.close();
   logger.info("terminal-app 終了");
 });

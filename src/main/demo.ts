@@ -14,13 +14,15 @@ interface DemoSeed {
   state: SessionState | "waiting-none";
   /** running: 経過秒 / done・confirm・error: 最終イベントからの経過秒 */
   ago: number;
+  /** 現在の作業テキスト（260712 課題B の表示確認用。実運用では UserPromptSubmit の prompt 由来） */
+  work?: string;
 }
 
 /** モック面 1b の 12 タイル構成（context-design-mock.md） */
 const MOCK_1B: DemoSeed[] = [
-  { name: "在庫管理-app", state: "done", ago: 120 }, // 完了・2分前
-  { name: "商品登録-app", state: "running", ago: 48 * 60 + 12 }, // 0:48:12
-  { name: "メルマガ作成-app", state: "confirm", ago: 60 }, // 確認待ち・1分前
+  { name: "在庫管理-app", state: "done", ago: 120, work: "棚卸し差分のレポートを作成して" }, // 完了・2分前
+  { name: "商品登録-app", state: "running", ago: 48 * 60 + 12, work: "Yahooカテゴリ反映ボタンを追加して" }, // 0:48:12
+  { name: "メルマガ作成-app", state: "confirm", ago: 60, work: "7月セールの下書きを作って" }, // 確認待ち・1分前
   { name: "商品ページ作成-app", state: "done", ago: 10 }, // 完了・たった今
   { name: "受注管理-app", state: "running", ago: 15 * 60 + 4 },
   { name: "顧客分析-app", state: "running", ago: 7 * 60 + 41 },
@@ -60,6 +62,7 @@ export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, cou
       lastEventAt: now - seed.ago * 1000,
       runningSince: seed.state === "running" ? now - seed.ago * 1000 : undefined,
       lastMessage: seed.state === "confirm" ? "Claude needs your permission to use Bash" : undefined,
+      workText: seed.work,
     });
   });
 }

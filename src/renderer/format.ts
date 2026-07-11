@@ -37,5 +37,6 @@ export function fmtStatusCounts(counts: StatusCounts): string {
   if (counts.done > 0) parts.push(`${counts.done}完了`);
   if (counts.confirm > 0) parts.push(`${counts.confirm}確認待ち`);
   if (counts.error > 0) parts.push(`${counts.error}エラー`);
+  if ((counts.disconnected ?? 0) > 0) parts.push(`${counts.disconnected}切断`); // 260712_2（オプショナル: 旧呼び出しは 0 扱い）
   return parts.length > 0 ? `${parts.join(" ")} / ${counts.total}セッション` : `${counts.total} セッション`;
 }

@@ -16,3 +16,13 @@ export const HOOK_MARKER = EVENT_PATH;
 
 /** 受信ボディ上限（防御的措置。hooks の stdin JSON はごく小さい） */
 export const MAX_BODY_BYTES = 256 * 1024;
+
+/**
+ * statusLine 転送の受信パス（260712_3 案A）。Claude Code の statusLine コマンド（curl）が
+ * stdin の JSON をここへ POST し、レスポンス本文（整形済みテキスト）がそのまま
+ * ターミナル下部の statusline 表示になる。
+ */
+export const STATUSLINE_PATH = "/terminal-app/statusline";
+
+/** statusLine 設定の識別マーカー（HOOK_MARKER と同じ思想: URL パス一致で自アプリ分と判定） */
+export const STATUSLINE_MARKER = STATUSLINE_PATH;

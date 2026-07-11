@@ -1,11 +1,12 @@
 /**
  * ① イベント受信サーバ（design.md 3.1 / 3.3 / 4.8 / 10 章, NFR-04）。
  * - 127.0.0.1 のみバインド（外部公開しない）
- * - POST /terminal-app/event のみ受理。他パスは 404、他メソッドは 405
+ * - POST /terminal-app/event（hooks）と POST /terminal-app/statusline（260712_3 案A）を受理。
+ *   他パスは 404、他メソッドは 405
  * - 不正 JSON・スキーマ不一致は 400 で破棄しログのみ（UI は変えない）
  */
 import * as http from "http";
-import { EVENT_PATH, MAX_BODY_BYTES } from "./constants";
+import { EVENT_PATH, MAX_BODY_BYTES, STATUSLINE_PATH } from "./constants";
 import type { LoggerLike } from "./logger";
 import { nullLogger } from "./logger";
 import type { HookEvent } from "./state-store";
@@ -15,6 +16,12 @@ export interface EventServerOptions {
   port: number;
   host?: string;
   onEvent: (evt: HookEvent, receivedAt: number) => void;
+  /**
+   * statusLine JSON 受信時のコールバック（260712_3 案A）。
+   * 戻り値の文字列がレスポンス本文になり、curl 経由でそのままターミナルの
+   * statusline 表示になる（null = 表示なし・204）。未指定なら STATUSLINE_PATH は 404。
+   */
+  onStatusLine?: (payload: unknown) => string | null;
   logger?: LoggerLike;
 }
 
@@ -22,6 +29,44 @@ export interface EventServer {
   listen(): Promise<{ host: string; port: number }>;
   close(): Promise<void>;
   address(): { host: string; port: number } | null;
+  /**
+   * listen が bind を試みるポート（= EventServerOptions.port）。
+   * listen 失敗時のエラー表示はこの値（または err.port）を正とする（260712 課題C:
+   * 設定値を表示に使うと実試行ポートとズレうる — 表示 41999 / 実 bind 41321 の実績あり）。
+   */
+  readonly targetPort: number;
+}
+
+/**
+ * listen 失敗エラーから「実際に bind を試みたポート」を解決する（260712 課題C）。
+ * Node の listen 系エラー（EADDRINUSE 等）は err.port に実試行ポートを持つためそれを最優先し、
+ * 無ければ fallbackPort（EventServer.targetPort）を使う。
+ */
+export function resolveAttemptedPort(err: unknown, fallbackPort: number): number {
+  if (err !== null && typeof err === "object") {
+    const port = (err as { port?: unknown }).port;
+    if (typeof port === "number" && Number.isInteger(port) && port > 0) return port;
+  }
+  return fallbackPort;
+}
+
+/**
+ * listen 失敗時のユーザー向け文言（260712 課題C）。
+ * EADDRINUSE は「ポート変更」ではなく実際に有効な対処（二重起動・他プロセスの確認）を先に案内する。
+ */
+export function buildListenErrorText(err: unknown, attemptedPort: number): { title: string; body: string; status: string } {
+  const isAddrInUse = err !== null && typeof err === "object" && (err as { code?: unknown }).code === "EADDRINUSE";
+  const title = "受信ポートを開けません";
+  const body = isAddrInUse
+    ? `ポート ${attemptedPort} は別のプロセスが使用中です。\n` +
+      `本アプリを二重に起動していないか確認してください。別のアプリがポート ${attemptedPort} を使用している場合は、\n` +
+      `%APPDATA%\\terminal-app\\config.json の "port" を空いている番号に変更して再起動してください。\n\n詳細: ${String(err)}`
+    : `ポート ${attemptedPort} を開けません。\n` +
+      `%APPDATA%\\terminal-app\\config.json の "port" を変更して再起動してください。\n\n詳細: ${String(err)}`;
+  const status = isAddrInUse
+    ? `受信ポート ${attemptedPort} は使用中です（二重起動または他プロセスを確認してください）`
+    : `受信ポート ${attemptedPort} を開けません（config.json の "port" を変更して再起動してください）`;
+  return { title, body, status };
 }
 
 export function createEventServer(opts: EventServerOptions): EventServer {
@@ -55,9 +100,32 @@ export function createEventServer(opts: EventServerOptions): EventServer {
     res.end();
   }
 
+  /**
+   * statusLine ボディの処理（260712_3 案A）: JSON パース → onStatusLine。
+   * 戻り値のテキストを 200 で返す（curl がそのまま statusline 表示に使う）。
+   * hooks と違い高頻度（最大 300ms 間隔）のため、不正 JSON のログは残さず 400 のみ。
+   */
+  function handleStatusLineBody(body: string, res: http.ServerResponse): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      respond(res, 400, "invalid json");
+      return;
+    }
+    const text = opts.onStatusLine?.(parsed) ?? null;
+    if (text === null) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    respond(res, 200, text, { "Content-Type": "text/plain; charset=utf-8" });
+  }
+
   function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     const url = (req.url ?? "").split("?")[0];
-    if (url !== EVENT_PATH) {
+    const isStatusLine = url === STATUSLINE_PATH && opts.onStatusLine !== undefined;
+    if (url !== EVENT_PATH && !isStatusLine) {
       respond(res, 404, "not found");
       return;
     }
@@ -83,7 +151,9 @@ export function createEventServer(opts: EventServerOptions): EventServer {
     });
     req.on("end", () => {
       if (aborted) return;
-      handleBody(Buffer.concat(chunks).toString("utf8"), Date.now(), res);
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (isStatusLine) handleStatusLineBody(body, res);
+      else handleBody(body, Date.now(), res);
     });
     req.on("error", (e) => {
       logger.warn(`event-server: リクエストエラー: ${String(e)}`);
@@ -123,5 +193,6 @@ export function createEventServer(opts: EventServerOptions): EventServer {
     address(): { host: string; port: number } | null {
       return bound;
     },
+    targetPort: opts.port,
   };
 }

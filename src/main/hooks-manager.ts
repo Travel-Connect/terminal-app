@@ -14,7 +14,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { DEFAULT_PORT, EVENT_PATH, HOOK_MARKER } from "./constants";
+import { DEFAULT_PORT, EVENT_PATH, HOOK_MARKER, STATUSLINE_MARKER, STATUSLINE_PATH } from "./constants";
 
 /**
  * 追記対象イベント。Stop / Notification に加え UserPromptSubmit を追記する
@@ -22,6 +22,17 @@ import { DEFAULT_PORT, EVENT_PATH, HOOK_MARKER } from "./constants";
  * UserPromptSubmit がプロンプト送信＝実行開始の検知経路になり、タイルを「実行中」へ遷移させる。
  */
 export const HOOK_EVENTS = ["Stop", "Notification", "UserPromptSubmit"] as const;
+
+/**
+ * 追加の追記対象イベント（260712_3）: TaskCreated → task_subject（タスクの作業タイトル）を
+ * タイルの作業テキストに使う。実在・payload 形（session_id / cwd / task_subject 等）は
+ * 2026-07-12 に実 claude 2.1.207 セッションの hook stdin ダンプで確認済み。
+ * HOOK_EVENTS と分けているのは互換のため（mergeHooks/removeHooks の既定挙動を変えない）。
+ */
+export const TASK_HOOK_EVENTS = ["TaskCreated"] as const;
+
+/** 実運用で追記する全イベント（index.ts の登録・起動時追補・除去はこちらを渡す） */
+export const ALL_HOOK_EVENTS = [...HOOK_EVENTS, ...TASK_HOOK_EVENTS] as const;
 
 export interface HookOpResult {
   ok: boolean;
@@ -49,6 +60,19 @@ type SettingsObject = Record<string, unknown>;
 export function buildHookCommand(port: number = DEFAULT_PORT): string {
   return (
     `curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:${port}${EVENT_PATH}` +
+    ` -H "Content-Type: application/json" --data-binary @-`
+  );
+}
+
+/**
+ * statusLine 転送コマンド（260712_3 案A）。stdin の statusLine JSON を本アプリへ POST し、
+ * レスポンス本文（整形済み「↓ 70.5k tokens · thinking xhigh」）を stdout に流す —
+ * statusline は stdout をそのまま表示するため、転送とターミナル表示が 1 コマンドで両立する。
+ * アプリ停止中は -m 1 で 1 秒以内に諦め、何も表示しない（セッションを阻害しない）。
+ */
+export function buildStatusLineCommand(port: number = DEFAULT_PORT): string {
+  return (
+    `curl.exe -s -m 1 -X POST http://127.0.0.1:${port}${STATUSLINE_PATH}` +
     ` -H "Content-Type: application/json" --data-binary @-`
   );
 }
@@ -164,7 +188,13 @@ function backupAndWrite(projectPath: string, settingsPath: string, raw: string |
  * 冪等: マーカー付きエントリが現在のコマンドと一致して存在する場合は何も書かない。
  * ポート変更時（design.md 3.3）: 旧ポートのマーカー付きエントリを現在のコマンドへ置き換える。
  */
-export function mergeHooks(projectPath: string, port: number = DEFAULT_PORT): HookOpResult {
+export function mergeHooks(
+  projectPath: string,
+  port: number = DEFAULT_PORT,
+  // 既定は従来の 3 イベント（design.md 4.1 の凍結仕様と既存検証に合わせる）。
+  // 実運用の呼び出し（index.ts）は ALL_HOOK_EVENTS を渡して TaskCreated も追記する（260712_3）
+  events: readonly string[] = HOOK_EVENTS
+): HookOpResult {
   const settingsPath = settingsPathFor(projectPath);
   const loaded = loadSettings(settingsPath);
   if (!loaded.ok || loaded.settings === undefined) {
@@ -178,7 +208,7 @@ export function mergeHooks(projectPath: string, port: number = DEFAULT_PORT): Ho
     return { ok: false, changed: false, error: "settings.json の hooks キーがオブジェクトではありません" };
   }
   const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
-  for (const evt of HOOK_EVENTS) {
+  for (const evt of events) {
     if (evt in hooks && !Array.isArray(hooks[evt])) {
       return { ok: false, changed: false, error: `settings.json の hooks.${evt} が配列ではありません` };
     }
@@ -187,7 +217,7 @@ export function mergeHooks(projectPath: string, port: number = DEFAULT_PORT): Ho
   // 変更が必要か判定（冪等性: design.md 4.2 手順 4）
   let changed = false;
   const nextHooks: Record<string, unknown> = { ...hooks };
-  for (const evt of HOOK_EVENTS) {
+  for (const evt of events) {
     const arr = Array.isArray(nextHooks[evt]) ? ([...(nextHooks[evt] as unknown[])] as unknown[]) : [];
     const markerEntries = arr.filter((e) => entryHasMarker(e));
     const upToDate = markerEntries.length === 1 && entryMatchesCommand(markerEntries[0], command);
@@ -214,11 +244,74 @@ export function mergeHooks(projectPath: string, port: number = DEFAULT_PORT): Ho
   return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
 }
 
+/** settings.json の statusLine が自アプリの転送コマンドか（URL パス一致。260712_3） */
+export function statusLineIsOurs(statusLine: unknown): boolean {
+  if (statusLine === null || typeof statusLine !== "object") return false;
+  const command = (statusLine as Record<string, unknown>).command;
+  return typeof command === "string" && command.includes(STATUSLINE_MARKER);
+}
+
+export interface StatusLineOpResult extends HookOpResult {
+  /** ユーザー自身の statusLine が既にあるため設定しなかったとき true（上書き事故防止） */
+  skipped?: boolean;
+}
+
+/**
+ * statusLine 転送設定のマージ（260712_3 案A）。hooks と同じ安全方針:
+ * - ユーザー自身の statusLine が既にある場合は一切触らない（skipped: true）。
+ *   statusLine は hooks と違い単一値のため、追記共存ができない — 上書きは事故になる
+ * - 自アプリ分が現在のポートと一致していれば no-op（冪等）
+ * - 自アプリ分が旧ポートなら現在のコマンドへ置換（ポート変更の追従）
+ */
+export function mergeStatusLine(projectPath: string, port: number = DEFAULT_PORT): StatusLineOpResult {
+  const settingsPath = settingsPathFor(projectPath);
+  const loaded = loadSettings(settingsPath);
+  if (!loaded.ok || loaded.settings === undefined) {
+    return { ok: false, changed: false, error: loaded.error };
+  }
+  const settings = loaded.settings;
+  const command = buildStatusLineCommand(port);
+
+  if ("statusLine" in settings && settings.statusLine !== undefined && settings.statusLine !== null) {
+    if (!statusLineIsOurs(settings.statusLine)) {
+      return { ok: true, changed: false, skipped: true }; // ユーザー自身の statusLine を尊重
+    }
+    if ((settings.statusLine as Record<string, unknown>).command === command) {
+      return { ok: true, changed: false }; // 冪等
+    }
+  }
+  try {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  } catch (e) {
+    return { ok: false, changed: false, error: `.claude ディレクトリを作成できません: ${String(e)}` };
+  }
+  settings.statusLine = { type: "command", command };
+  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+}
+
+/** statusLine 転送設定の除去（260712_3）。自アプリ分のみ削除し、ユーザー自身の設定は残す */
+export function removeStatusLine(projectPath: string): HookOpResult {
+  const settingsPath = settingsPathFor(projectPath);
+  if (!fs.existsSync(settingsPath)) return { ok: true, changed: false };
+  const loaded = loadSettings(settingsPath);
+  if (!loaded.ok || loaded.settings === undefined) {
+    return { ok: false, changed: false, error: loaded.error };
+  }
+  const settings = loaded.settings;
+  if (!statusLineIsOurs(settings.statusLine)) return { ok: true, changed: false };
+  delete settings.statusLine;
+  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+}
+
 /**
  * 登録解除時の除去（design.md 4.2 除去手順）。
  * 自アプリのマーカー付きエントリのみを取り除き、空になった配列・空になった hooks キーは削除する。
  */
-export function removeHooks(projectPath: string): HookOpResult {
+export function removeHooks(
+  projectPath: string,
+  // mergeHooks と同じ理由で既定は従来 3 イベント。実運用（index.ts）は ALL_HOOK_EVENTS を渡す
+  events: readonly string[] = HOOK_EVENTS
+): HookOpResult {
   const settingsPath = settingsPathFor(projectPath);
   if (!fs.existsSync(settingsPath)) {
     return { ok: true, changed: false }; // 元々何もない → 除去不要
@@ -234,7 +327,7 @@ export function removeHooks(projectPath: string): HookOpResult {
   const hooks = settings.hooks as Record<string, unknown>;
 
   let changed = false;
-  for (const evt of HOOK_EVENTS) {
+  for (const evt of events) {
     const arr = hooks[evt];
     if (!Array.isArray(arr)) continue;
     const filtered = arr.filter((e) => !entryHasMarker(e));

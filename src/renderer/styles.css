@@ -172,13 +172,26 @@ body {
   text-overflow: ellipsis;
 }
 
-.tile-center { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+.tile-center { display: flex; align-items: center; gap: 6px; min-height: 20px; max-width: 100%; }
+
+/* 現在の作業テキスト（260712 課題B: ターミナルのオレンジ表示に相当する実データ = 最新 prompt）。
+   未取得時は hidden（[hidden] ルールで非表示 = レイアウトが壊れないフォールバック） */
+.tile-work {
+  font-size: 11px;
+  color: var(--amber);
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .tile-icon { font-size: 15px; font-weight: 700; display: none; }
 .tile.state-done .tile-icon    { display: inline; color: var(--green); }
 .tile.state-confirm .tile-icon { display: inline; color: var(--amber); }
 .tile.state-error .tile-icon   { display: inline; color: var(--red); }
 .tile.state-waiting .tile-icon { display: inline; color: var(--text-dim); }
+.tile.state-disconnected .tile-icon { display: inline; color: var(--text-dim); } /* 切断 = 沈黙（発光なし。260712_2） */
 
 /* 実行中 = ニュートラル＋スピナー（呼吸発光なし。AC-07） */
 .tile-spinner {
@@ -196,6 +209,10 @@ body {
 .tile.state-done .tile-status    { color: var(--green); }
 .tile.state-confirm .tile-status { color: var(--amber); }
 .tile.state-error .tile-status   { color: var(--red); }
+
+/* 切断（260712_2）: 生きていないことを一目で伝える — タイル全体を沈ませ、作業テキストも消灯 */
+.tile.state-disconnected { opacity: 0.62; }
+.tile.state-disconnected .tile-work { color: var(--text-dim); }
 
 /* ---------------- 空状態（面 1c） ---------------- */
 

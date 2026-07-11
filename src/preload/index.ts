@@ -14,6 +14,7 @@ const api: TerminalAppApi = {
   setAlwaysOnTopDefault: (value: boolean) => ipcRenderer.invoke("set-aot-default", value),
   setPinned: (value: boolean) => ipcRenderer.invoke("set-pinned", value),
   focusProject: (id: string) => ipcRenderer.invoke("focus-project", id),
+  showTileMenu: (id: string) => ipcRenderer.invoke("show-tile-menu", id),
   windowAction: (action: "minimize" | "maximize" | "close") => ipcRenderer.send("window-action", action),
   notifyRendered: (revision: number) => ipcRenderer.send("notify-rendered", revision),
   onSnapshot: (cb: (snap: Snapshot) => void) => {
