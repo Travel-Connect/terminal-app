@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+
+# eval-loop の稼働状態（採点基準・状態ファイル。リポジトリに焼き込まない）
+.loop/
+
+# terminal-app 自身が実行時に注入する hooks 設定（マシンローカル・.bak 含む）
+.claude/

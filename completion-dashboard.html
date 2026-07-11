@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>完了報告 — terminal-app リファクタ・バグ調査・GitHub プッシュ（2026-07-11）</title>
+<style>
+  body{font-family:sans-serif;margin:0;padding:16px;background:#f5f6f8;color:#222;line-height:1.6}
+  main{max-width:720px;margin:0 auto}
+  section{background:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;
+          box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  h1{font-size:1.2rem}h2{font-size:1rem;margin:0 0 8px}
+  .blocker{border-left:4px solid #2e7d32}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.8rem}
+  .ok{background:#e6f4ea;color:#1e7e34}
+  .ng{background:#fdecea;color:#c0392b}
+  .todo{background:#fff4e5;color:#8a5300}
+  .unk{background:#eceff1;color:#455a64}
+  ul,ol{margin:4px 0;padding-left:20px}
+  pre{overflow-x:auto;background:#f0f1f3;padding:8px;border-radius:6px}
+  table{border-collapse:collapse;font-size:.9rem;width:100%}
+  td,th{border-bottom:1px solid #e0e0e0;padding:4px 10px;text-align:left;vertical-align:top}
+  code{background:#f0f1f3;padding:0 4px;border-radius:4px}
+  a{color:#1565c0}
+</style>
+</head>
+<body>
+<main>
+  <h1>完了報告 — terminal-app リファクタ・バグ調査・GitHub プッシュ（2026-07-11）</h1>
+
+  <section class="blocker"><h2>結論</h2>
+    <p>依頼の 4 点をすべて完了しました。
+    (1) <strong>バグ調査</strong> — 全モジュール監査で 13 件発見、7 件修正・6 件を理由付きで見送り（<code>docs/bug-audit.md</code>）。
+    (2) <strong>機能非破壊のリファクタリング</strong> — 既存テストを一切改変せず、テスト 89 件 / 型検査 / lint / build すべて exit 0 のまま構造を整理。
+    (3) <strong>GitHub</strong> — プライベートリポジトリ <a href="https://github.com/kurocoma/terminal-app">kurocoma/terminal-app</a> に全ソースをプッシュ済み。
+    (4) 本 HTML 報告。ブロッカーはありません。</p>
+  </section>
+
+  <section><h2>1. バグ調査の結果（詳細: docs/bug-audit.md）</h2>
+    <ul>
+      <li><span class="badge ok">完了</span> 対象: <code>src/</code> 全 14 モジュール＋ <code>scripts/</code>。観点別（リソースリーク / エラーハンドリング / 非同期競合 / 境界値 / Windows 固有）に通読監査</li>
+      <li><span class="badge ok">修正 7 件</span> 主なもの:
+        <ul>
+          <li>受信ボディの UTF-8 チャンク境界文字化け（Buffer 蓄積へ変更・event-server）</li>
+          <li>listen 成功後の 'error' リスナー残存によるクラッシュ/握りつぶしリスク（event-server）</li>
+          <li>レイテンシ計測 Map・登録解除後セッションのメモリ単調増加 2 件（常駐アプリのため長期稼働で効く）</li>
+          <li>Windows の rename 失敗時に .tmp ファイルが堆積（hooks-manager）</li>
+          <li>多重起動時の「ポート使用中」誤ダイアログ競合窓 / <code>--capture-delay</code> 非数値で即キャプチャされる境界値</li>
+        </ul></li>
+      <li><span class="badge unk">見送り 6 件</span> 全件に理由を明記（例: ログローテの UTC 基準は実害が境界 9h ズレのみ、127.0.0.1 バインドのため低速送信対策は過剰防御 等）</li>
+    </ul>
+  </section>
+
+  <section><h2>2. リファクタリング（機能非破壊）</h2>
+    <ul>
+      <li><span class="badge ok">完了</span> 定数の一元化 — <code>src/main/constants.ts</code>（ポート / イベントパス / hooks マーカー / ボディ上限）を event-server・hooks-manager・project-store が共有。重複リテラルを排除</li>
+      <li><span class="badge ok">完了</span> 表示整形の純関数分離 — <code>src/renderer/format.ts</code>（経過時間・相対時刻・ステータスバー表記）。DOM 非依存になり単体テスト 15 件でカバー</li>
+      <li><span class="badge ok">完了</span> 共有型の一本化 — <code>src/shared/types.d.ts</code> に main / preload / renderer の型を集約し重複定義を解消</li>
+      <li><span class="badge ok">完了</span> hooks マーカー判定の厳格化 — 「terminal-app 部分一致」→「URL パス <code>/terminal-app/event</code> 一致」。ユーザー自身の hook を誤除去するハザードを解消（前回懸念事項の消化）</li>
+      <li><span class="badge ok">完了</span> StateStore の責務整理 — プロジェクト解除時のセッション破棄を <code>removeProjectSessions()</code> として StateStore 側に集約</li>
+      <li><span class="badge ok">完了</span> 非破壊の証明 — tests/ の既存ファイルは無改変のまま全テスト通過。公開 API・レスポンスコード・表示仕様は不変</li>
+    </ul>
+  </section>
+
+  <section><h2>3. 検証結果（プッシュ直前に全件再実行）</h2>
+    <table>
+      <tr><th>検証</th><th>コマンド</th><th>結果</th></tr>
+      <tr><td>単体・統合テスト</td><td><code>npm test</code></td><td><span class="badge ok">exit 0</span> 7 ファイル / 89 テスト passed</td></tr>
+      <tr><td>型検査（main / renderer / tests）</td><td><code>npm run typecheck</code></td><td><span class="badge ok">exit 0</span></td></tr>
+      <tr><td>静的解析</td><td><code>npm run lint</code></td><td><span class="badge ok">exit 0</span></td></tr>
+      <tr><td>ビルド</td><td><code>npm run build</code></td><td><span class="badge ok">exit 0</span></td></tr>
+    </table>
+    <p>※ 送信中のローディング表示はご確認いただいたとおり正常動作（ご報告に基づく。今回の変更でも renderer の表示仕様には触れていません）。</p>
+  </section>
+
+  <section><h2>4. GitHub リポジトリ</h2>
+    <ul>
+      <li>URL: <a href="https://github.com/kurocoma/terminal-app">https://github.com/kurocoma/terminal-app</a>（<strong>private</strong> / アカウント: kurocoma）</li>
+      <li>プッシュ内容: src / tests / scripts / docs（spec・design・verification・bug-audit）/ README / 本報告 HTML / 各種設定</li>
+      <li>除外（.gitignore）: <code>node_modules/</code> <code>dist/</code> <code>*.log</code> <code>.loop/</code>（採点基準・ループ状態）<code>.claude/</code>（マシンローカル hooks 設定）</li>
+    </ul>
+  </section>
+
+  <section><h2>残タスク（今回スコープ外・持ち越し）</h2>
+    <ul>
+      <li>手動 E2E チェックリスト通し（実マウス D&amp;D・実ウィンドウ前面化・最小化復元 等 — verification.md 6 章）</li>
+      <li>V-20（アイドル CPU）の実測と verification-results.md 更新</li>
+      <li>実 Claude Code セッションでの実発火確認（擬似注入では検証済み）</li>
+      <li>見送りバグ 6 件の再評価（実運用で顕在化した場合のみ。判断根拠は bug-audit.md に記録済み）</li>
+    </ul>
+  </section>
+
+  <section><h2>懸念事項</h2>
+    <ul>
+      <li>アプリ停止中の hook 発火は毎イベント約 2 秒のタイムアウト待ちが発生（既知・仕様許容内。--connect-timeout で短縮の余地）</li>
+      <li>ログローテーションが UTC 日付基準（JST 朝 9 時切替）— 実害なしと判断し見送り（bug-audit #8）</li>
+      <li>リポジトリは private 作成。公開（public 化）やコラボレータ追加が必要なら指示ください</li>
+    </ul>
+  </section>
+
+  <section><h2>推奨される次の一手</h2>
+    <ol>
+      <li>GitHub 上でコミット内容を一読 → 問題なければこのまま実運用（README の手順で起動し実プロジェクトを D&amp;D）</li>
+      <li>実運用で気になる挙動があれば bug-audit.md の見送り 6 件と照合のうえ次周回で対応します</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>
