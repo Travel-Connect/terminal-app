@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>質問ダッシュボード</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
+          --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  main { max-width:1120px; margin:0 auto; }
+  header { margin-bottom:20px; }
+  h1 { margin:0 0 8px; font-size:28px; }
+  h2 { margin:0 0 12px; font-size:18px; }
+  .meta { color:var(--muted); font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px;
+          padding:18px; box-shadow:0 1px 2px rgba(0,0,0,.04); margin-bottom:16px; }
+  .status { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+            font-size:13px; font-weight:700; border:1px solid var(--border); white-space:nowrap; }
+  .ok { color:var(--ok); background:#dcfce7; }   .warn { color:var(--warn); background:#fef3c7; }
+  .bad { color:var(--bad); background:#fee2e2; } .info { color:var(--info); background:#dbeafe; }
+  .summary-list { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .summary-item { border:1px solid var(--border); border-radius:12px; padding:14px; background:#fafafa; }
+  .summary-item strong { display:block; margin-bottom:6px; }
+  .table-wrap { width:100%; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { border-bottom:1px solid var(--border); padding:10px 8px; vertical-align:top; text-align:left; }
+  th { color:var(--muted); font-weight:700; background:#fafafa; }
+  ul, ol { margin:8px 0 0; padding-left:22px; }
+  .muted { color:var(--muted); }
+  .priority-high { font-weight:700; color:var(--bad); }
+  .priority-mid  { font-weight:700; color:var(--warn); }
+  .priority-low  { font-weight:700; color:var(--muted); }
+  @media (max-width:760px) {
+    body { padding:14px; }
+    .summary-list { grid-template-columns:1fr; }
+    table { font-size:13px; }
+    th, td { padding:8px 6px; }
+  }
+  @media print {
+    body { background:#ffffff; padding:0; }
+    .card { box-shadow:none; break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>質問ダッシュボード</h1>
+    <div class="meta">作成日時: 2026-07-12 01:10 / 対象作業: terminal-app 修正依頼（260712_2修正依頼.md — 切断検知・切断表示・再接続・右クリックメニュー・機能提案）/
+      判定: <span class="status warn">B: 実装前に質問</span></div>
+  </header>
+
+  <section class="card">
+    <h2>0. 3秒サマリー</h2>
+    <div class="summary-list">
+      <div class="summary-item"><strong>何の作業か</strong>
+        <p>セッションが切断（アプリに終了の合図が届かないまま消えること）されたときの通知と表示、リセット後の再接続、プロジェクトタイルの右クリックメニュー（再接続・削除）の追加。あわせて便利機能の提案を HTML でまとめる。</p></div>
+      <div class="summary-item"><strong>なぜ質問しているか</strong>
+        <span class="status warn">回答待ち</span>
+        <p>「切断」の判定方法と「削除」の意味を取り違えると、検知ロジックとメニューの作り直し（出戻り）になるためです。</p></div>
+      <div class="summary-item"><strong>質問の数</strong>
+        <span class="status bad">全 6 問（うち回答必須 5 問）</span>
+        <p>回答必須（[BLOCKING]）の質問に答えてもらえれば次に進めます。</p></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>1. 質問一覧</h2>
+    <p class="muted">出戻りコスト（間違えたときの作り直しの大きさ）が高い順に並べています。
+      選択肢の記号（A/B/C）でそのまま答えられます。「まだ決めていない」も有効な回答です。</p>
+    <div class="table-wrap"><table>
+      <tr><th>No.</th><th>テーマ</th><th>優先度</th><th>種別</th><th>質問</th><th>選択肢</th><th>推奨案と理由</th><th>根拠</th></tr>
+      <tr>
+        <td>1</td>
+        <td>切断の定義・検知方法</td>
+        <td class="priority-high">高</td>
+        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
+        <td>何をもって「切断」と判定しますか？</td>
+        <td>A. transcript（Claude Code の会話記録ファイル）の更新停止＋ウィンドウ消失の併用<br>B. transcript の更新停止のみ<br>C. ウィンドウ消失のみ<br>D. hook イベントの途絶時間で判定</td>
+        <td>A を推奨。実行中は hook イベントが来ないのが正常のため D は誤検知が多い。transcript は応答生成中に更新され続けるので確実性が高く、ウィンドウ消失（既存機能の流用）を補助にすると精度が上がる。</td>
+        <td>src/main/state-store.ts:58（transcript_path 保持）、src/main/window-control.ts:199（「ウィンドウが見つかりません」既存）</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>お知らせの形</td>
+        <td class="priority-high">高</td>
+        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
+        <td>切断を検知したとき、タイルの切断表示に加えてどんな「お知らせ」を出しますか？</td>
+        <td>A. Windows トースト通知（画面右下に出る OS の通知）も出す<br>B. アプリ内のみ（タイル表示＋ステータスバー）<br>C. その他</td>
+        <td>A を推奨。アプリを最小化していても気づけるのが「お知らせが欲しい」の意図に合うため。</td>
+        <td>依頼文「切断されたら切断されたってお知らせが欲しい」。通知音は既存仕様で無効固定（src/renderer/renderer.ts:191 REQ-12/AC-18）のため音は対象外と仮定</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>再接続の期待動作</td>
+        <td class="priority-high">高</td>
+        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
+        <td>リセット（アプリ再起動）後の再接続は、どの動作を期待しますか？　※技術的には難しくありません（transcript の走査で復元可能）</td>
+        <td>A. 右クリックの手動「再接続」で拾い直す<br>B. アプリ起動時の自動復元＋手動「再接続」の両方<br>C. 次の hook イベントでの自然復帰で十分</td>
+        <td>A を推奨。依頼の右クリックメニューと直結し、終了済みセッションを誤って「実行中」に復活させるリスクを操作者が制御できるため。B は自動復元の誤検知対策とセットで実装可能。</td>
+        <td>セッションは揮発設計（src/main/state-store.ts:292 resetAll「再起動で全タイル待機」）。画像 20260712005833 の「0 セッション」状態と一致</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>右クリック「削除」の意味</td>
+        <td class="priority-high">高</td>
+        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
+        <td>右クリックメニューの「削除」は何を消しますか？</td>
+        <td>A. プロジェクトの登録解除（hooks も除去。設定画面の既存機能と同じ）<br>B. タイルの表示クリアのみ（登録は維持）<br>C. 「登録解除」と「表示クリア」の 2 項目に分ける</td>
+        <td>A を推奨。既存の登録解除（設定画面）への導線追加なので挙動が既知で安全。切断セッションの掃除も欲しい場合は C。</td>
+        <td>src/renderer/renderer.ts:246-253（既存の登録解除 UI）、src/shared/types.d.ts:94（unregisterProject API）</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>進め方</td>
+        <td class="priority-mid">中</td>
+        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
+        <td>実装は前回と同じ run-eval-loop（自動採点つき品質ループ）で回しますか？</td>
+        <td>A. 前回同様 run-eval-loop で回す（threshold 90 / max 4・HTML 進捗報告つき）<br>B. ループなしで直接実装する</td>
+        <td>A を推奨。前回と同じ運用で採点による品質担保と HTML 報告が揃うため。</td>
+        <td>前回依頼（260712.md）は run-eval-loop で完走（score 99/100）</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>機能提案のまとめ先</td>
+        <td class="priority-low">低</td>
+        <td><span class="status warn">[ASSUMPTION] 仮定可</span></td>
+        <td>「あったら便利な機能」の HTML はどこにまとめますか？</td>
+        <td>A. Artifact（ブラウザで見られる共有リンク。前回の進捗報告と同じ形式）<br>B. リポジトリ内にファイル保存（docs/ 配下）<br>C. 両方</td>
+        <td>A を推奨。前回「HTML で報告」を Artifact で運用した実績があり、閲覧・共有が容易なため。無回答なら A で進めます。</td>
+        <td>依頼文「HTMLでまとめてください」。前回の進捗報告は Artifact で公開済み</td>
+      </tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>2. これまでに確定したこと・置く予定の仮定</h2>
+    <p class="muted">回答が無い場合にこのまま採用する前提です。違っていたらチャットで指摘してください。</p>
+    <div class="table-wrap"><table>
+      <tr><th>タグ</th><th>内容</th><th>根拠・そう仮定する理由</th></tr>
+      <tr><td><span class="status ok">確定</span></td>
+        <td>タイルに「切断」状態の表示を追加する（切断された旨がわかるステータス）</td>
+        <td>依頼文 2 節「切断されたステータスは、切断された旨がわかるようにしてほしい」より</td></tr>
+      <tr><td><span class="status ok">確定</span></td>
+        <td>右クリックメニューの対象はプロジェクトのタイル。「再接続」「削除」の 2 項目を含む</td>
+        <td>依頼文 4 節と画像 20260712005833（タイル 4 枚の画面）より</td></tr>
+      <tr><td><span class="status warn">[ASSUMPTION]</span></td>
+        <td>「WebUI をリセット」＝アプリの再起動を指す（セッション表示が全て「待機・イベント待ち／0 セッション」に戻った状態）</td>
+        <td>UI にリセットボタンは存在せず、再起動で全タイル待機になる揮発設計（state-store.ts:292）が画像 20260712005833 と一致するため</td></tr>
+      <tr><td><span class="status warn">[ASSUMPTION]</span></td>
+        <td>「あったら便利な機能」は提案のみで、今回は実装しない</td>
+        <td>依頼文が「考えてみて。HTMLでまとめてください」であり実装指示ではないため</td></tr>
+      <tr><td><span class="status warn">[ASSUMPTION]</span></td>
+        <td>通知音は追加しない（既存仕様どおり無効固定を維持）</td>
+        <td>REQ-12 / AC-18 で通知音は MVP では常に OFF・無効（renderer.ts:191）。変更が小さく元に戻しやすい安全側のため</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>3. 不足している資料のお願い</h2>
+    <p class="muted">判定が C（資料が無いと正しく特定・実装できない）のときに使います。
+      それ以外は「該当なし」となります。</p>
+    <div class="table-wrap"><table>
+      <tr><th>必要なもの</th><th>なぜ必要か</th><th>渡し方の例</th></tr>
+      <tr><td>該当なし</td><td>-</td><td>-</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>4. 回答方法</h2>
+    <ul>
+      <li>この HTML は<strong>閲覧専用</strong>です。この画面上では回答できません
+        （動きを付ける仕組み（JavaScript）を入れていないためです）。</li>
+      <li>回答は<strong>チャットへの返信</strong>でお願いします。選択式の質問画面
+        （AskUserQuestion）が表示されている場合は、そちらで選ぶのが最も確実です。</li>
+      <li>テキストで答える場合の書き方の例: 「1は A、2は B、3は任せる」のように
+        <strong>質問番号 + 選択肢の記号</strong>で書いてください。</li>
+      <li>「任せる」と答えた質問は、いちばん安全（変更が小さく元に戻しやすい）な案で進めます。</li>
+      <li>回答必須（[BLOCKING]）の質問に回答をもらうまで、実装・次の工程には進みません。</li>
+    </ul>
+    <p class="muted">ラベルの意味: [BLOCKING]=回答があるまで先に進まない質問 /
+      [ASSUMPTION]=回答が無ければ記載の仮定のまま進める軽微な項目</p>
+  </section>
+</main>
+</body>
+</html>
