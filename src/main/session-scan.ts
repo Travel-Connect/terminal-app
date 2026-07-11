@@ -24,6 +24,70 @@ export interface LiveSessionInfo {
   transcriptPath: string;
   mtimeMs: number;
   workText?: string;
+  /** transcript 終端の分類（260712_4）。concluded なら「実行中」ではなく「完了」で復元する */
+  turnEnd: TurnEndState;
+}
+
+/**
+ * transcript 終端の分類（260712_4）:
+ * - concluded = 直近のターンは終わっている（正常完了またはユーザー割り込み）
+ * - open      = ターン進行中（または開始直後）
+ * - unknown   = 判定材料なし（安全側 = 完了扱いしない）
+ */
+export type TurnEndState = "concluded" | "open" | "unknown";
+
+/** 割り込み時に transcript へ記録されるマーカー（2026-07-12 実測: "[Request interrupted by user for tool use]" 等） */
+const INTERRUPT_MARKER = "[Request interrupted";
+
+/** レコード先頭の text（string content または最初の text ブロック）。無ければ undefined */
+function firstTextOf(rec: Record<string, unknown>): string | undefined {
+  const message = rec.message as Record<string, unknown> | undefined;
+  if (message === undefined || message === null || typeof message !== "object") return undefined;
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const block = content.find(
+      (b: unknown): b is { type: string; text: string } =>
+        b !== null && typeof b === "object" && (b as { type?: unknown }).type === "text" &&
+        typeof (b as { text?: unknown }).text === "string"
+    );
+    return block?.text;
+  }
+  return undefined;
+}
+
+/**
+ * 終端分類の本体。入力は「新しい順」のレコード列（tailRecords の返却順）。
+ *
+ * 判定は user / assistant / system{stop_hook_summary, turn_duration} のみで行い、他はスキップする —
+ * 末尾には attachment・queue-operation・permission-mode・mode・ai-title・last-prompt・
+ * system{local_command} 等のメタレコードが混ざる（2026-07-12 実測）。未知の型のスキップは安全:
+ * 誤って concluded を返す方向には倒れない（決定はレコードの意味が確定している型のみで行う）。
+ * - 正常完了: 最終 assistant の直後に system{stop_hook_summary}→{turn_duration} が書かれる（実測）
+ * - 割り込み（Esc）: Stop hook は発火せず user("[Request interrupted…]") が終端に残る（実測）
+ * - 進行中: user(tool_result) / assistant が終端側に来る
+ */
+export function classifyTurnEnd(records: ReadonlyArray<Record<string, unknown>>): TurnEndState {
+  for (const rec of records) {
+    const type = rec.type;
+    if (type === "system") {
+      const sub = (rec as { subtype?: unknown }).subtype;
+      if (sub === "stop_hook_summary" || sub === "turn_duration") return "concluded";
+      continue; // local_command 等の system メタはスキップ
+    }
+    if (type === "user") {
+      const text = firstTextOf(rec);
+      if (text !== undefined && text.trim().startsWith(INTERRUPT_MARKER)) return "concluded";
+      return "open"; // プロンプト・tool_result はターン開始直後/進行中
+    }
+    if (type === "assistant") return "open"; // 生成直後・ツール実行直前（完了なら直後に system が続く）
+  }
+  return "unknown";
+}
+
+/** ファイルパスから終端分類する（掃引用。読めなければ unknown = 安全側） */
+export function turnEndOf(filePath: string): TurnEndState {
+  return classifyTurnEnd(tailRecords(filePath));
 }
 
 export function mungeProjectPath(projectPath: string): string {
@@ -146,7 +210,13 @@ export function scanLiveSessions(
         break;
       }
     }
-    found.push({ sessionId: entry.name.slice(0, -".jsonl".length), transcriptPath: filePath, mtimeMs, workText });
+    found.push({
+      sessionId: entry.name.slice(0, -".jsonl".length),
+      transcriptPath: filePath,
+      mtimeMs,
+      workText,
+      turnEnd: classifyTurnEnd(records),
+    });
   }
   return found.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }

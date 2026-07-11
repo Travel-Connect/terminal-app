@@ -310,22 +310,65 @@ export class StateStore extends EventEmitter {
   }
 
   /**
-   * 再接続（260712_2）: transcript 走査で見つかった動作中セッションを「実行中」として復元する。
-   * hook イベントの方が新しい記録を持つ場合（lastEventAt がより新しい）は上書きしない —
-   * 走査結果は「transcript の最終更新時点」の情報であり、イベント由来の状態が常に優先。
+   * 再接続（260712_2、260712_4 で終端分類対応）: transcript 走査で見つかったセッションを復元する。
+   *
+   * 復元状態は transcript 終端の分類（turnEnd）で決める:
+   * - concluded（ターン終了済み）→「完了」。従来は無条件に「実行中」で復元しており、
+   *   done 済みセッションでも transcript mtime が Stop イベント時刻より新しいため
+   *   ガードをすり抜けてスピナーに戻っていた（2026-07-11T21:57 実測バグ）。
+   * - open / unknown → 従来どおり「実行中」（切断からの復帰・再起動後の復元）。
+   *   ただし実行中セッションには触らない（runningSince を transcript mtime で巻き戻さない）。
+   * - 終了系状態（done/confirm/error）は、イベントの方が新しい場合と concluded の見立ての場合は
+   *   動かさない（イベント由来の状態が優先）。
    */
-  reviveSession(info: { sessionId: string; projectId: string; lastEventAt: number; transcriptPath: string; workText?: string }): boolean {
+  reviveSession(info: {
+    sessionId: string;
+    projectId: string;
+    lastEventAt: number;
+    transcriptPath: string;
+    workText?: string;
+    turnEnd?: "concluded" | "open" | "unknown";
+  }): boolean {
+    const concluded = info.turnEnd === "concluded";
     const existing = this.sessions.get(info.sessionId);
-    if (existing !== undefined && existing.lastEventAt >= info.lastEventAt && existing.state !== "disconnected") return false;
+    if (existing !== undefined && existing.state !== "disconnected") {
+      if (existing.state === "running") {
+        if (!concluded) return false; // 進行中の見立て → 現状維持
+        // 実行中 + ターン終了済み → 「完了」へ（Stop 欠落スタックの手動ヒール）
+        existing.state = "done";
+        existing.runningSince = undefined;
+        existing.lastEventAt = Math.max(existing.lastEventAt, info.lastEventAt);
+        existing.transcriptPath = info.transcriptPath;
+        this.emit("changed");
+        return true;
+      }
+      if (existing.lastEventAt >= info.lastEventAt) return false; // イベントの方が新しい（従来ガード）
+      if (concluded) return false; // 終了済みの見立てで終了系状態を動かさない
+      // transcript の方が新しく、ターンも開いている → 開始イベント欠落とみなし「実行中」へ（従来動作）
+    }
     this.sessions.set(info.sessionId, {
       sessionId: info.sessionId,
       projectId: info.projectId,
-      state: "running",
+      state: concluded ? "done" : "running",
       lastEventAt: info.lastEventAt,
-      runningSince: info.lastEventAt,
+      runningSince: concluded ? undefined : info.lastEventAt,
       transcriptPath: info.transcriptPath,
       workText: info.workText ?? existing?.workText,
     });
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * 終了検知（260712_4）: Stop 欠落の「実行中」セッションを「完了」へ降格する（掃引から呼ばれる）。
+   * markDisconnected と対称 — 実行中のみ対象、イベント由来の確定状態は上書きしない。
+   */
+  markConcluded(sessionId: string): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "running") return false;
+    rec.state = "done";
+    rec.runningSince = undefined;
+    rec.lastEventAt = this.now();
     this.emit("changed");
     return true;
   }

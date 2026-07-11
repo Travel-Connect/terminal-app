@@ -19,11 +19,11 @@ import type { ClickTarget, OpResult, RegisterResult, Snapshot, ThemeSetting } fr
 import { seedDemo } from "./demo";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
-import { DISCONNECT_CHECK_INTERVAL_MS, findDisconnected } from "./liveness-monitor";
+import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected } from "./liveness-monitor";
 import { Logger } from "./logger";
 import { getDataDir } from "./paths";
 import { ProjectStore, validateProjectDir } from "./project-store";
-import { scanLiveSessions } from "./session-scan";
+import { scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { classifyNotification, StateStore } from "./state-store";
 import { focusProjectWindow, hasWindowFor, isAvailable as windowApiAvailable, listTopLevelWindows, type TopLevelWindow } from "./window-control";
@@ -188,13 +188,31 @@ function showDisconnectToast(projectName: string): void {
 }
 
 /**
- * 1 掃引: 実行中セッションの transcript 更新時刻とウィンドウ存在を確認し、
- * 切断と判定されたものを「切断」状態へ遷移 ＋ トースト通知する。
+ * 1 掃引: 実行中セッションについて
+ * (1) 終了検知（260712_4）: transcript 終端がターン完了を示すものを「完了」へ —
+ *     割り込み（Esc）では Stop hook が発火せず、実行中のまま取り残されるため。
+ *     切断判定より先に行う（終了済みセッションを「切断」と誤表示しない）。
+ * (2) 切断検知: transcript 更新時刻とウィンドウ存在で「切断」へ遷移 ＋ トースト通知。
  * ウィンドウ列挙（EnumWindows）は 1 掃引につき最大 1 回に抑える（遅延取得）。
  */
 function sweepLiveness(): void {
   const targets = stateStore.runningSessions();
   if (targets.length === 0) return;
+  let changed = false;
+
+  const concludedHits = findConcluded(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf });
+  const concludedIds = new Set<string>();
+  for (const t of concludedHits) {
+    if (!stateStore.markConcluded(t.sessionId)) continue;
+    changed = true;
+    concludedIds.add(t.sessionId);
+    const project = projectStore.getProject(t.projectId);
+    logger.info(
+      `終了検知: ${project?.name ?? t.projectId} (session=${t.sessionId}) — Stop 未受信だが transcript がターン完了を示すため「完了」へ`
+    );
+  }
+
+  const rest = targets.filter((t) => !concludedIds.has(t.sessionId));
   let windows: TopLevelWindow[] | null = null;
   const windowPresent = (projectId: string): boolean | null => {
     const project = projectStore.getProject(projectId);
@@ -202,8 +220,7 @@ function sweepLiveness(): void {
     if (windows === null) windows = listTopLevelWindows();
     return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
   };
-  const hits = findDisconnected(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, windowPresent });
-  let changed = false;
+  const hits = findDisconnected(rest, { now: () => Date.now(), mtimeMs: statMtimeMs, windowPresent });
   for (const t of hits) {
     if (!stateStore.markDisconnected(t.sessionId)) continue;
     changed = true;
@@ -264,14 +281,16 @@ function unregisterProjectById(id: string): OpResult {
 }
 
 /**
- * 再接続（260712_2）: transcript 走査で「直近まで動いていた」セッションを復元する。
+ * 再接続（260712_2、260712_4 で終端分類対応）: transcript 走査でセッションを復元する。
  * アプリ再起動（セッションは揮発）後や切断誤検知からの復帰の手動導線。
+ * 復元状態は transcript 終端で決まる（終了済み →「完了」/ 進行中 →「実行中」）。
  */
 function reconnectProject(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
   const found = scanLiveSessions(project.path);
   let revived = 0;
+  let concluded = 0;
   for (const s of found) {
     const ok = stateStore.reviveSession({
       sessionId: s.sessionId,
@@ -279,13 +298,17 @@ function reconnectProject(id: string): void {
       lastEventAt: s.mtimeMs,
       transcriptPath: s.transcriptPath,
       workText: s.workText,
+      turnEnd: s.turnEnd,
     });
-    if (ok) revived += 1;
+    if (!ok) continue;
+    revived += 1;
+    if (s.turnEnd === "concluded") concluded += 1;
   }
-  logger.info(`再接続: ${project.name} — 走査 ${found.length} 件 / 復元 ${revived} 件`);
+  const detail = concluded > 0 ? `（うち終了済み → 完了 ${concluded} 件）` : "";
+  logger.info(`再接続: ${project.name} — 走査 ${found.length} 件 / 復元 ${revived} 件${detail}`);
   setStatus(
     revived > 0
-      ? `再接続: ${project.name} のセッション ${revived} 件を復元しました`
+      ? `再接続: ${project.name} のセッション ${revived} 件を復元しました${detail}`
       : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
   );
 }

@@ -40,6 +40,37 @@ export const DISCONNECT_CHECK_INTERVAL_MS = envMs("TERMINAL_APP_LIVENESS_INTERVA
 export const TRANSCRIPT_STALE_MS = envMs("TERMINAL_APP_TRANSCRIPT_STALE_MS", 180_000);
 /** transcript 無更新がこの時間を超えたら、ウィンドウが残っていても「切断」（長時間ツール実行の誤検知を避ける余裕。既定 15 分） */
 export const TRANSCRIPT_STALE_HARD_MS = envMs("TERMINAL_APP_TRANSCRIPT_STALE_HARD_MS", 15 * 60_000);
+/** 終了検知（260712_4）: transcript 無更新がこの時間以上のものだけ終端分類する（ターン境界・Stop 配送中との競合回避。既定 10 秒） */
+export const CONCLUDED_MIN_AGE_MS = envMs("TERMINAL_APP_CONCLUDED_MIN_AGE_MS", 10_000);
+
+export interface ConcludedSweepDeps {
+  now(): number;
+  /** transcript ファイルの mtime（epoch ms）。取得不可（不存在・権限）は null */
+  mtimeMs(path: string): number | null;
+  /** transcript 終端の分類（session-scan.turnEndOf を注入。concluded 以外は対象外） */
+  turnEnd(path: string): "concluded" | "open" | "unknown";
+}
+
+/**
+ * 終了検知（260712_4）: 「実行中」のうち、transcript 終端がターン完了を示すものを返す。
+ *
+ * 背景: 割り込み（Esc）では Stop hook が発火しない（2026-07-11 実測 — transcript に
+ * stop_hook_summary が無く "[Request interrupted by user for tool use]" のみ残る）。
+ * その場合「実行中」から抜ける経路が無く、ウィンドウが生きている限り
+ * 切断検知（HARD 15 分）までスピナーが回り続けた。呼び出し側はヒットを「完了」へ遷移させる。
+ * 切断判定より先に適用する — 終了済みセッションを「切断」と誤表示しないため。
+ */
+export function findConcluded(targets: readonly SweepTarget[], deps: ConcludedSweepDeps): SweepTarget[] {
+  const out: SweepTarget[] = [];
+  for (const t of targets) {
+    if (t.transcriptPath === undefined) continue; // 実データが無ければ判定しない（安全側）
+    const mtime = deps.mtimeMs(t.transcriptPath);
+    if (mtime === null) continue;
+    if (deps.now() - mtime < CONCLUDED_MIN_AGE_MS) continue; // 直後は Stop が配送中かもしれない
+    if (deps.turnEnd(t.transcriptPath) === "concluded") out.push(t);
+  }
+  return out;
+}
 
 /**
  * 1 回の掃引: 対象（実行中セッション）のうち切断と判定されたものを返す。
