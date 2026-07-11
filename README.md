@@ -47,6 +47,8 @@ npm start
 | `npm run smoke:win32` | Win32 FFI（ウィンドウ列挙・前面化 API）のスモーク確認 |
 | `node scripts/verify-injection.mjs <出力先>` | デモ起動＋擬似イベント注入（UserPromptSubmit→実行中を含む）＋バインド確認（verification.md 3.4 / 3.7）を自動実行し証跡を残す |
 | `node scripts/verify-upgrade.mjs <出力先>` | 旧 2 イベント構成サンドボックスへの起動時追補（before/after）と UserPromptSubmit 注入→実行中表示を実測し証跡を残す（実 %APPDATA%・実プロジェクトに非接触） |
+| `node scripts/verify-real-session.mjs <出力先>` | 実 `claude -p` セッション＋マージ済み実 hook コマンドで、hooks 整備→実行中→完了→再起動保持→未起動時の無害性を通しで実測し証跡を残す（専用ポートで実稼働アプリと共存） |
+| `node scripts/verify-foreground.mjs <出力先>` | 実ターミナルウィンドウを開き、前面化（V-09 #8）と最小化からの復元＋前面化（#9）を GetForegroundWindow / IsIconic で実測する（実行中は一瞬フォーカスが移る） |
 
 検証・証跡用の起動フラグ（`npx electron . <flags>`）:
 
