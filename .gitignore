@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.log
 
+# 検証証跡のログはコミット対象（上の *.log 除外の例外）
+!docs/evidence/**/*.log
+
 # eval-loop の稼働状態（採点基準・状態ファイル。リポジトリに焼き込まない）
 .loop/
 

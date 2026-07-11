@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41999/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41999/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41999/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

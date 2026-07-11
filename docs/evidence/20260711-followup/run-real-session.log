@@ -1,0 +1,13 @@
+
+2026-07-11T15:05:22.889Z [INFO] terminal-app 起動 (dataDir=C:\Users\hppym\AppData\Local\Temp\ta-real-data-BFvwFU, demo=false)
+2026-07-11T15:05:22.897Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-real-uI4IiB\sandbox-real-session
+2026-07-11T15:05:22.927Z [INFO] event-server: listening on http://127.0.0.1:41999/terminal-app/event
+2026-07-11T15:05:23.091Z [INFO] window shown (demo=false, capture=C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-session-done.png)
+2026-07-11T15:05:25.088Z [INFO] event 受信: UserPromptSubmit → running (project=p-real1, session=ae02a665-d1b8-4e51-ab85-5a8237507160)
+2026-07-11T15:05:25.091Z [INFO] ui-latency: 受信→描画完了 4ms (revision=1)
+2026-07-11T15:05:32.923Z [INFO] event 受信: Stop → done (project=p-real1, session=ae02a665-d1b8-4e51-ab85-5a8237507160)
+2026-07-11T15:05:32.932Z [INFO] ui-latency: 受信→描画完了 9ms (revision=2)
+2026-07-11T15:06:08.095Z [INFO] pin-check: setAlwaysOnTop(true) → isAlwaysOnTop=true
+2026-07-11T15:06:08.096Z [INFO] pin-check: setAlwaysOnTop(false) → isAlwaysOnTop=false
+2026-07-11T15:06:08.120Z [INFO] capture saved: C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-session-done.png
+2026-07-11T15:06:08.133Z [INFO] terminal-app 終了

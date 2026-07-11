@@ -129,3 +129,69 @@ before/after 原本 = evidence/upgrade-before.settings.json / upgrade-after.sett
 
 実セッションでプロンプトを送信し、UserPromptSubmit hook の実発火 → タイルが「実行中」へ
 変わることを確認する（verification.md 3.2 / 3.3 と同枠。擬似注入では受信経路のみ検証済み）。
+**→ 7 章（2026-07-11 フォローアップ）で解消。**
+
+## 7. 追記: 手動枠の実測化と実セッション実発火の確認（2026-07-11 フォローアップ。証跡 = `docs/evidence/20260711-followup/`）
+
+これまで「実 Claude Code セッション・実ウィンドウが必要」として手動枠に残していた項目を、
+実 claude プロセス（ヘッドレス `claude -p`）と実ウィンドウを使った自動検証で実測した。
+あわせて回帰テストを 8 件追加し（tests/ の既存ファイルは無改変）、実装バグ 3 件を発見・修正した
+（bug-audit.md 4 章 #14〜#16）。
+
+### 7.1 実セッションの実発火（V-04 / V-05 / OPEN-04 の実測 — 6 章 #4・#5 の解消）
+
+3 経路すべてで「実 Claude Code セッション → hooks 実発火 → 受信 → タイル遷移」を実測した:
+
+1. **本開発セッション自身（対話モード）** — この検証作業を行っている Claude Code セッション
+   （project p-43d5, session e7707b33-…）の UserPromptSubmit / Stop / Notification が、
+   実稼働アプリ（ポート 41321）に実受信されている（evidence/real-app-log-excerpt.log (1)。
+   プロンプト送信 13:42 → running、応答完了 13:55 → done 等）。
+2. **信頼済みディレクトリでのヘッドレス実行** — 本リポジトリ直下で `claude -p` を実行し、
+   実稼働アプリが UserPromptSubmit → running（14:26:11）・Stop → done（14:26:15）を実受信
+   （session 474e89e3-…。同ログ (2)）。
+3. **サンドボックス通し検証（`node scripts/verify-real-session.mjs` — 10/10 PASS）** — 一時プロジェクト＋専用
+   ポート 41999 で、起動時追補 → 実 claude -p → UserPromptSubmit → running（ui-latency 4ms）→
+   Stop → done（ui-latency 9ms）→ 完了タイルのスクリーンショットまで通しで自動実測
+   （evidence/real-session-results.log、app-real-session-done.png）。**NFR-01（1 秒以内）を実発火で確認。**
+
+### 7.2 V-09 前面化・最小化復元の実測（6 章 #8・#9 の解消）
+
+`node scripts/verify-foreground.mjs`（evidence/foreground-results.log）: 実ターミナルウィンドウ
+（windowsterminal.exe）を新規に開き、アプリ本体の `focusProjectWindow` で **7/7 PASS** —
+(1) 前面化成功＋GetForegroundWindow 一致（#8）、(2) SW_MINIMIZE → IsIconic=true から復元＋前面化
+（#9）、(3) 不一致対象は ok=false（例外なし）。
+補助証跡: 実稼働アプリでのユーザー実クリックによる「前面化 成功」ログ多数（real-app-log-excerpt.log (3)。
+clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
+
+### 7.3 再起動後の登録保持（6 章 #12 / T-10）と V-14
+
+- verify-real-session の Phase 3: 再起動後も projects.json の登録が保持され（V-01 後半）、
+  セッション状態は持ち越されない（受信 0 件 = 全タイル「待機」。T-10）。スクリーンショット =
+  evidence/app-real-restart-waiting.png
+- Phase 4（V-14）: アプリ未起動で (a) 整備済み実 hook コマンドは `curl -m 2` により短時間で
+  打ち切られ非ブロック（exit 28 ≠ 2）、(b) 実 `claude -p` セッションも exit 0 で完走
+  （アプリ稼働中と同等の所要時間）。
+
+### 7.4 追加した回帰テスト（bug-audit #1 / #6 の直接カバー）
+
+`npm test`: **9 ファイル / 97 テスト全件 green**（+8 件。tests/ の既存ファイル無改変）
+
+- `tests/event-server-multibyte.test.ts` — TCP チャンクがマルチバイト文字（3 バイト日本語・
+  4 バイト絵文字）の途中で割れても原文一致・U+FFFD 不在。上限超過（413）は onEvent へ届かない
+- `tests/state-store-remove.test.ts` — removeProjectSessions の対象限定除去・件数追随・
+  changed 発火条件・再登録シナリオ
+
+### 7.5 フォローアップで発見・修正した実装バグ（bug-audit.md 4 章）
+
+| # | 内容 | 検出経緯 |
+|---|------|----------|
+| 14 | config.json の `port` 変更が受信サーバに反映されない（トップレベルで既定ポートを捕捉） | 専用ポートのサンドボックス検証で hooks 送信先と listen が食い違い発覚 |
+| 15 | 受信ポート使用中のエラーダイアログがウィンドウ生成前に出てメインプロセスを塞ぐ（「UI は起動継続」にならない） | #14 との複合で無人検証がハング |
+| 16 | TERMINAL_APP_DATA_DIR 指定時も Electron userData（Chromium プロファイル）が実稼働と共有され並走時に競合 | 実稼働アプリと検証の並走で顕在化 |
+
+修正後、`npm test`（97 件）/ typecheck / lint / build すべて exit 0。
+
+### 7.6 手動枠に残る項目
+
+- 6 章 #2（実マウスでの D&D 登録）・#6（呼吸発光の動的な見え方の目視）・#13（テーマのモック比較目視）
+- OPEN-03（claude プロセス強制終了時の発火実測）は引き続き未実施（受け口は実装済み）

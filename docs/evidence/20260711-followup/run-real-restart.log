@@ -1,0 +1,8 @@
+
+2026-07-11T15:06:08.330Z [INFO] terminal-app 起動 (dataDir=C:\Users\hppym\AppData\Local\Temp\ta-real-data-BFvwFU, demo=false)
+2026-07-11T15:06:08.362Z [INFO] event-server: listening on http://127.0.0.1:41999/terminal-app/event
+2026-07-11T15:06:08.533Z [INFO] window shown (demo=false, capture=C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-restart-waiting.png)
+2026-07-11T15:06:13.545Z [INFO] pin-check: setAlwaysOnTop(true) → isAlwaysOnTop=true
+2026-07-11T15:06:13.546Z [INFO] pin-check: setAlwaysOnTop(false) → isAlwaysOnTop=false
+2026-07-11T15:06:13.559Z [INFO] capture saved: C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-restart-waiting.png
+2026-07-11T15:06:13.571Z [INFO] terminal-app 終了

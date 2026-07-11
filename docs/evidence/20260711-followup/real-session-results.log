@@ -1,0 +1,29 @@
+# 実 Claude Code セッション検証（2026-07-11T15:05:22.759Z / port=41999 / model=haiku）
+## Phase 1: アプリ起動と hooks 自動整備（起動時追補）
+PASS: アプリ起動（window shown）
+PASS: 起動時追補: 空 settings.json へ 3 イベントの hooks（専用ポート宛て）が整備された
+整備された hook コマンド: curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41999/terminal-app/event -H "Content-Type: application/json" --data-binary @-
+## Phase 2: 実 claude -p セッションの hooks 実発火（#4 / #5 の実測）
+claude 実行(アプリ稼働中): exit=0 / 所要=9.8s / 出力="⚠ Sandbox disabled: sandbox is enabled but windows is not supported (requires macOS, Linux, or WSL2)\n  Commands will run"
+PASS: 実セッションが正常終了した（exit 0）
+PASS: 実発火: UserPromptSubmit を受信しタイルが「実行中」へ（#5 / OPEN-04 案 A）
+PASS: 実発火: Stop を受信しタイルが「完了」へ（#4 / V-04）
+アプリ終了コード: 0 / 完了タイルのスクリーンショット: C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-session-done.png
+PASS: 受信→描画レイテンシが全件 1000ms 以内（NFR-01） — 実測=4,9ms
+### アプリログ抜粋（追補・受信・描画レイテンシ）
+2026-07-11T15:05:22.897Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-real-uI4IiB\sandbox-real-session
+2026-07-11T15:05:23.091Z [INFO] window shown (demo=false, capture=C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-session-done.png)
+2026-07-11T15:05:25.088Z [INFO] event 受信: UserPromptSubmit → running (project=p-real1, session=ae02a665-d1b8-4e51-ab85-5a8237507160)
+2026-07-11T15:05:25.091Z [INFO] ui-latency: 受信→描画完了 4ms (revision=1)
+2026-07-11T15:05:32.923Z [INFO] event 受信: Stop → done (project=p-real1, session=ae02a665-d1b8-4e51-ab85-5a8237507160)
+2026-07-11T15:05:32.932Z [INFO] ui-latency: 受信→描画完了 9ms (revision=2)
+## Phase 3: 再起動後の登録保持と揮発（#12 / T-10）
+PASS: 再起動後も登録プロジェクトが保持されている（V-01 後半）
+PASS: 再起動後にセッション状態を持ち越していない（T-10: 受信 0 件 = タイルは「待機」表示） — スクリーンショット: C:\Users\hppym\dev\terminal-app\docs\evidence\20260711-followup\app-real-restart-waiting.png
+## Phase 4: アプリ未起動時の無害性（#15 / V-14）
+PASS: アプリ未起動時の実 hook コマンドは短時間で打ち切られ非ブロック（exit != 0・ブロック用 exit 2 でない・5 秒以内） — exit=28 / 所要=4.06s（curl -m 2 による打ち切り）
+claude 実行(アプリ停止中): exit=0 / 所要=10.6s / 出力="⚠ Sandbox disabled: sandbox is enabled but windows is not supported (requires macOS, Linux, or WSL2)\n  Commands will run"
+PASS: アプリ未起動でも実セッションが完走する（exit 0・エラー表示なし）
+参考: アプリ稼働中 9.8s ⇔ 未起動 10.6s
+## 一時サンドボックス・一時データディレクトリを削除済み（実環境への影響なし）
+## 結果: 10/10 PASS

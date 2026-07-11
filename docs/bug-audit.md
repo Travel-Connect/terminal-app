@@ -71,3 +71,20 @@
 修正 #1〜#7 は既存テストの通過をもって「挙動非破壊（外部仕様不変）」を確認した。
 #1（UTF-8 チャンク境界）と #6（セッション残留）は既存テストでは直接カバーされない内部堅牢性の修正だが、
 公開 API・レスポンスコード・表示仕様は一切変えていない。
+
+---
+
+## 4. 追記: フォローアップ検証で発見・修正したバグ（2026-07-11 深夜）
+
+実 Claude Code セッション検証（`scripts/verify-real-session.mjs`）を実稼働アプリと並走させた際に
+顕在化した。いずれも修正済みで、既存テスト（97 件・tests/ 無改変）・typecheck・lint・build は exit 0。
+
+| # | 観点 | 場所 | 内容 | 修正 |
+|---|------|------|------|------|
+| 14 | 初期化順序 | `src/main/index.ts` | `createEventServer` をモジュールトップレベルで生成していたため、`projectStore.load()`（whenReady 内）前の**既定ポートを捕捉**し、config.json の `port` 変更が受信サーバに反映されない（hooks コマンド側は load 後の値を使うため、ポートを変更すると送信先と listen が食い違う） | サーバ生成を whenReady 内（load 後）へ移動。`node scripts/verify-real-session.mjs` で 41999 listen を実測確認 |
+| 15 | エラーハンドリング | `src/main/index.ts` | 受信ポート使用中の `dialog.showErrorBox` を**ウィンドウ生成前**に呼んでいたため、モーダルがメインプロセスを塞ぎ「UI は起動継続」（design.md 10 章）にならず起動ごと固まる。無人実行（--capture）では永久ハング | ウィンドウ表示後にステータス表示＋ダイアログの順へ変更。--capture 実行時はダイアログを抑止（ログ＋ステータスのみ） |
+| 16 | 分離不足 | `src/main/index.ts` | `TERMINAL_APP_DATA_DIR` はアプリ独自データのみ差し替え、Electron の userData（Chromium プロファイル）は実稼働インスタンスと共有のままだったため、検証・デモ実行を実稼働と並走させるとプロファイルロック競合でハング・大幅遅延しうる | `TERMINAL_APP_DATA_DIR` 指定時は `app.setPath("userData", <dataDir>/electron-user-data)` で隔離 |
+
+発見の経緯: #14 と #15 の複合により「実稼働アプリの稼働中に別ポート指定でサンドボックス検証を起動すると、
+41321 への EADDRINUSE → 起動前モーダルでハング」が発生。verify スクリプトのウォッチドッグ導入と
+起動診断（stdout 全量確認）で切り分けた。

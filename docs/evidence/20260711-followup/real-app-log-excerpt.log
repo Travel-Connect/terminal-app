@@ -1,0 +1,58 @@
+# 実稼働アプリ（%APPDATA%\terminal-app\logs\app.log）の実使用証跡（抜粋・読み取りのみ）
+# 採取日時: 2026-07-11T14:51:10Z / 実稼働インスタンス PID 56196・ポート 41321
+
+## (1) 本 Claude Code セッション（terminal-app 開発セッション = project p-43d5, session e7707b33-…）の実発火
+#     13:42 UserPromptSubmit=「ループの続きを行って」送信時 / 13:55 Stop=応答完了時 / 13:58 UserPromptSubmit=「続けて…」送信時
+2026-07-11T13:42:29.293Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T13:55:10.469Z [INFO] event 受信: Stop → done (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T13:56:10.879Z [INFO] event 受信: Notification 種別=idle → confirm (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T13:58:57.727Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T14:47:46.280Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T14:48:05.135Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+
+## (2) 信頼済みディレクトリでの実 claude -p（headless）による実発火（session 474e89e3-…）
+#     UserPromptSubmit → running と Stop → done が 3.5 秒差で実受信されている
+2026-07-11T14:26:11.583Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=474e89e3-05d4-4f1d-a38c-e696ee78110c)
+2026-07-11T14:26:15.076Z [INFO] event 受信: Stop → done (project=p-43d5, session=474e89e3-05d4-4f1d-a38c-e696ee78110c)
+
+## (3) 実セッション全体の受信・描画レイテンシ・実クリック前面化（直近 40 行）
+2026-07-11T14:30:17.864Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:30:18.408Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:30:21.157Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:30:21.922Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:30:33.269Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:30:34.505Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:30:35.127Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:30:38.433Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:30:40.835Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:33:05.735Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:34:30.150Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:34:30.734Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:34:32.388Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:34:34.590Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:34:35.072Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:35:12.790Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:35:14.350Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:35:14.972Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:35:20.718Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:35:32.231Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:37:45.345Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:37:47.066Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:38:50.920Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:39:30.581Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:43:04.067Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:43:06.989Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:44:49.392Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:44:50.835Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:45:00.990Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:45:03.444Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:47:32.581Z [INFO] 前面化 成功: product-register → cursor
+2026-07-11T14:47:38.426Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:47:46.280Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T14:47:46.290Z [INFO] ui-latency: 受信→描画完了 10ms (revision=127)
+2026-07-11T14:48:05.135Z [INFO] event 受信: UserPromptSubmit → running (project=p-43d5, session=e7707b33-f848-4856-89a7-043853ebfe77)
+2026-07-11T14:48:05.140Z [INFO] ui-latency: 受信→描画完了 5ms (revision=128)
+2026-07-11T14:48:16.977Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:48:23.332Z [INFO] 前面化 成功: zaico-kanri-app → cursor
+2026-07-11T14:48:24.821Z [INFO] 前面化 成功: terminal-app → cursor
+2026-07-11T14:48:30.285Z [INFO] 前面化 成功: product-register → cursor

@@ -1,0 +1,10 @@
+# V-09 前面化・最小化復元の実測（2026-07-11T14:15:44.205Z）
+検証用ウィンドウ: title=ta-v09-target-window  exe=windowsterminal.exe（terminal 対象 exe 群のいずれかであること）
+PASS: 前面化 #8: focusProjectWindow が成功を返す
+PASS: 前面化 #8: GetForegroundWindow が対象ウィンドウ
+PASS: 最小化: IsIconic = true（前提の成立確認）
+PASS: 復元 #9: focusProjectWindow が成功を返す
+PASS: 復元 #9: 最小化が解除された（IsIconic = false）
+PASS: 復元 #9: GetForegroundWindow が対象ウィンドウ
+PASS: 不一致対象: ok=false を返し例外にならない — ウィンドウが見つかりません（__no_such_window__ / terminal）
+## 結果: 7/7 PASS

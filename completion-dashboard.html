@@ -65,7 +65,7 @@
   <section><h2>3. 検証結果（プッシュ直前に全件再実行）</h2>
     <table>
       <tr><th>検証</th><th>コマンド</th><th>結果</th></tr>
-      <tr><td>単体・統合テスト</td><td><code>npm test</code></td><td><span class="badge ok">exit 0</span> 7 ファイル / 89 テスト passed</td></tr>
+      <tr><td>単体・統合テスト</td><td><code>npm test</code></td><td><span class="badge ok">exit 0</span> 7 ファイル / 89 テスト passed（フォローアップ後: 9 ファイル / 97 テスト）</td></tr>
       <tr><td>型検査（main / renderer / tests）</td><td><code>npm run typecheck</code></td><td><span class="badge ok">exit 0</span></td></tr>
       <tr><td>静的解析</td><td><code>npm run lint</code></td><td><span class="badge ok">exit 0</span></td></tr>
       <tr><td>ビルド</td><td><code>npm run build</code></td><td><span class="badge ok">exit 0</span></td></tr>
@@ -81,11 +81,28 @@
     </ul>
   </section>
 
-  <section><h2>残タスク（今回スコープ外・持ち越し）</h2>
+  <section><h2>5. 追記: フォローアップ検証（同日深夜。証跡: docs/evidence/20260711-followup/）</h2>
     <ul>
-      <li>手動 E2E チェックリスト通し（実マウス D&amp;D・実ウィンドウ前面化・最小化復元 等 — verification.md 6 章）</li>
-      <li>V-20（アイドル CPU）の実測と verification-results.md 更新</li>
-      <li>実 Claude Code セッションでの実発火確認（擬似注入では検証済み）</li>
+      <li><span class="badge ok">完了</span> <strong>実 Claude Code セッションの実発火を 3 経路で実測</strong> —
+        (1) 本開発セッション自身の UserPromptSubmit / Stop が実稼働アプリに実受信、
+        (2) 信頼済みディレクトリでのヘッドレス <code>claude -p</code>、
+        (3) サンドボックス通し検証 <code>scripts/verify-real-session.mjs</code>（実 claude 発火 → 実行中 → 完了、ui-latency 2〜6ms ≤ 1000ms = NFR-01 実発火で確認）。手動枠 #4・#5 を解消</li>
+      <li><span class="badge ok">完了</span> <strong>V-09 前面化・最小化復元の実測 7/7 PASS</strong> — <code>scripts/verify-foreground.mjs</code> が実ターミナルウィンドウで前面化（#8）と最小化からの復元＋前面化（#9）を GetForegroundWindow / IsIconic で確認。実運用ログにもユーザー実クリックの「前面化 成功」多数</li>
+      <li><span class="badge ok">完了</span> 再起動後の登録保持＋状態揮発（#12 / T-10）・アプリ未起動時の無害性（#15 / V-14 — 実 hook コマンド 2 秒打ち切り・実セッション完走）を自動実測化</li>
+      <li><span class="badge ok">完了</span> <strong>回帰テスト 8 件追加</strong>（UTF-8 チャンク境界 / removeProjectSessions — bug-audit #1・#6 の直接カバー）。テストは 89 → <strong>97 件</strong>全 green（既存テスト無改変）</li>
+      <li><span class="badge ng">新規バグ 3 件発見 → 修正済み</span> 検証を実稼働アプリと並走させて顕在化（bug-audit.md 4 章 #14〜#16）:
+        <ul>
+          <li>#14 config.json の <code>port</code> 変更が受信サーバに反映されない（初期化順序）</li>
+          <li>#15 ポート使用中のエラーダイアログが起動を塞ぐ（「UI は起動継続」にならない）</li>
+          <li>#16 検証・デモ実行の Chromium プロファイルが実稼働と共有され並走時に競合</li>
+        </ul></li>
+    </ul>
+  </section>
+
+  <section><h2>残タスク（持ち越し）</h2>
+    <ul>
+      <li>手動 E2E の残り: #2 実マウスでの D&amp;D 登録・#6 呼吸発光の動的な見え方・#13 テーマのモック比較（いずれも目視枠）</li>
+      <li>OPEN-03: claude プロセス強制終了時に何が発火するかの実測（受信側の受け口は実装済み）</li>
       <li>見送りバグ 6 件の再評価（実運用で顕在化した場合のみ。判断根拠は bug-audit.md に記録済み）</li>
     </ul>
   </section>
@@ -94,6 +111,7 @@
     <ul>
       <li>アプリ停止中の hook 発火は毎イベント約 2 秒のタイムアウト待ちが発生（既知・仕様許容内。--connect-timeout で短縮の余地）</li>
       <li>ログローテーションが UTC 日付基準（JST 朝 9 時切替）— 実害なしと判断し見送り（bug-audit #8）</li>
+      <li>ポートを変更した場合は再起動後に各プロジェクトへ hooks が自動再追記される（起動時追補）が、旧ポート宛ての hook エントリは残るため手動整理が必要になる場合がある</li>
       <li>リポジトリは private 作成。公開（public 化）やコラボレータ追加が必要なら指示ください</li>
     </ul>
   </section>
