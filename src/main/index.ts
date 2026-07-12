@@ -15,13 +15,14 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from "electro
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, OpResult, RegisterResult, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, OpResult, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
 import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected } from "./liveness-monitor";
 import { Logger } from "./logger";
+import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { scanLiveSessions, turnEndOf } from "./session-scan";
@@ -122,6 +123,9 @@ if (!demoMode && capturePath === undefined) {
 // 「config.json の port 変更が反映されない」バグになる（2026-07-11 検証で発見・修正）
 let eventServer: EventServer | null = null;
 
+/** セッションごとに最後に通知を出した状態（260712_5）。同一状態への再遷移で通知が連発するのを防ぐ */
+const lastNotifiedState = new Map<string, SessionState>();
+
 function createAppEventServer(): EventServer {
   return createEventServer({
     // デモ実行は hooks を書かず受信も不要のため空きポート（0）で listen し、
@@ -143,6 +147,19 @@ function createAppEventServer(): EventServer {
           `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
         );
       }
+      // 完了・確認待ちのトースト通知（260712_5）。状態が実際に変化したときのみ通知する
+      // （同一状態への再遷移では通知しない = 過剰通知の抑制）
+      if (shouldNotify(lastNotifiedState.get(result.sessionId), result.state)) {
+        const project = projectStore.getProject(result.projectId);
+        if (project !== null) {
+          if (result.state === "done") {
+            showSessionToast(project.name, `${project.name}: セッションが完了しました`, "応答が完了しました。");
+          } else if (result.state === "confirm") {
+            showSessionToast(project.name, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
+          }
+        }
+      }
+      lastNotifiedState.set(result.sessionId, result.state);
       broadcast(receivedAt);
     },
     // statusLine 転送（260712_3 案A）: メトリクスをタイルへ反映し、整形テキストを
@@ -191,14 +208,14 @@ function statMtimeMs(p: string): number | null {
   }
 }
 
-/** 切断トースト（260712_2）。通知音は REQ-12（次期）まで鳴らさない = silent 固定 */
-function showDisconnectToast(projectName: string): void {
+/**
+ * Windows トースト通知の共通発火処理（260712_2 で導入、260712_5 で汎用化）。
+ * `Notification.isSupported()` ガード・`silent: true`・クリックで前面化、を 1 箇所に集約する。
+ * 通知音は REQ-12（次期）まで鳴らさない = silent 固定。
+ */
+function showSessionToast(_projectName: string, title: string, body: string): void {
   if (!Notification.isSupported()) return;
-  const n = new Notification({
-    title: `${projectName}: セッションが切断されました`,
-    body: "終了の合図が届かないまま更新が止まりました。タイル右クリック →「再接続」で拾い直せます。",
-    silent: true,
-  });
+  const n = new Notification({ title, body, silent: true });
   n.on("click", () => {
     if (win === null) return;
     if (win.isMinimized()) win.restore();
@@ -206,6 +223,15 @@ function showDisconnectToast(projectName: string): void {
     win.focus();
   });
   n.show();
+}
+
+/** 切断トースト（260712_2） */
+function showDisconnectToast(projectName: string): void {
+  showSessionToast(
+    projectName,
+    `${projectName}: セッションが切断されました`,
+    "終了の合図が届かないまま更新が止まりました。タイル右クリック →「再接続」で拾い直せます。"
+  );
 }
 
 /**

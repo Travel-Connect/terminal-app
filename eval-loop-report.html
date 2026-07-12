@@ -128,18 +128,17 @@
 
   <header>
     <p class="kicker">EVAL-LOOP REPORT</p>
-    <h1 class="doc-title">terminal-app 自体を再起動するボタンの追加</h1>
-    <p class="doc-meta"><span>完了 <b>2026-07-12 11:14</b></span><span>周回 <b>1</b></span><span>合格点 <b>90</b></span></p>
+    <h1 class="doc-title">完了・確認待ちへの通知拡張</h1>
+    <p class="doc-meta"><span>完了 <b>2026-07-12 15:02</b></span><span>周回 <b>1</b></span><span>合格点 <b>90</b></span></p>
   </header>
 
   <!-- ===== 01 あなたに必要なこと ===== -->
   <section>
     <h2><span class="no">01</span>あなたに必要なこと</h2>
-    <p class="todo-sum">確認 2 件 ・ 操作 1 件 ・ 決定 なし</p>
+    <p class="todo-sum">確認 1 件 ・ 操作 1 件 ・ 決定 なし</p>
     <ul class="todo">
-      <li><span class="pill check">確認してください</span><span class="txt">実機での動作確認がまだです。<code>npm run build &amp;&amp; npm start</code> でアプリを起動し、タイトルバーの新しいボタン（アイコンのみ、設定ボタンの隣）を押して、確認ダイアログ →「再起動」でアプリが実際に再起動することを確かめてください。</span></li>
-      <li><span class="pill check">確認してください</span><span class="txt">採点係が残した軽微な指摘: (1) ボタン押下からの一連の流れ（キャンセル時に再起動しない／確認時に一度だけ起動）を検証する自動テストはまだ無く、単体モジュールのテストのみです。(2) 再起動ボタンはアイコンのみなので「表示のリロード」と誤読される余地がありますが、ツールチップと確認ダイアログで実害は防止されています。</span></li>
-      <li><span class="pill action">操作が必要です</span><span class="txt">今回の変更（5 ファイル修正＋新規 2 ファイル）はまだコミットされていません。内容を確認後、<code>git add</code> と <code>git commit</code> で確定してください。</span></li>
+      <li><span class="pill check">確認してください</span><span class="txt">実機で動作を確認してください。<code>npm run build &amp;&amp; npm start</code> で起動し、セッションが完了した時／確認待ちになった時に、Windows 右上にトースト通知が出ることを確かめてください（クリックでアプリが前面化します）。</span></li>
+      <li><span class="pill action">操作が必要です</span><span class="txt">今回の変更（1 ファイル修正＋新規 2 ファイル）はまだコミットされていません。内容を確認後、<code>git add</code> と <code>git commit</code> で確定してください（必要であれば push も）。</span></li>
     </ul>
   </section>
 
@@ -148,12 +147,12 @@
     <h2><span class="no">02</span>結論</h2>
     <div class="verdict">
       <div class="score">
-        <span class="n">97</span>
+        <span class="n">96</span>
         <span class="d">/ 100 点</span>
       </div>
       <div class="vbody">
         <p class="vline"><span class="pill pass">合格</span><span class="vnote">合格点 90 点を 1 周目で超えました</span></p>
-        <p class="vsum">terminal-app のタイトルバーに「アプリを再起動」ボタンを追加しました。押すと確認ダイアログが出て、承諾するとアプリ本体（Electron プロセス）が安全に再起動します。型チェック・lint・既存テスト（234 件）はすべて通過し、既存のテストファイルへの変更はありません。</p>
+        <p class="vsum">terminal-app の Windows 右上トースト通知を拡張しました。これまでは「セッションが切断された」ときだけ通知が出ていましたが、今回「セッションが完了した」「確認が必要（権限確認・入力待ちなど）」になったときにも通知が出るようになりました。同じ状態が続く間は何度も通知しないよう調整済みです。型チェック・lint・既存テスト（241 件）はすべて通過し、既存のテストファイルへの変更はありません。</p>
       </div>
     </div>
   </section>
@@ -164,8 +163,8 @@
     <div class="chart">
       <div class="crow">
         <span class="lbl"><b>1</b> 周目</span>
-        <span class="track"><span class="fill pass" style="width:97%;"></span><span class="thr" style="left:90%;"></span></span>
-        <span class="cval">97<span class="st ok">合格</span></span>
+        <span class="track"><span class="fill pass" style="width:96%;"></span><span class="thr" style="left:90%;"></span></span>
+        <span class="cval">96<span class="st ok">合格</span></span>
       </div>
       <p class="cnote"><span class="thr-key"></span>縦線 = 合格点 90 点（100 点満点）</p>
     </div>
@@ -188,10 +187,10 @@
         <tbody>
           <tr>
             <td class="rnd">1</td>
-            <td><span class="agent">Claude</span><span class="model">fable</span></td>
-            <td><span class="agent">Claude</span><span class="model">opus</span></td>
-            <td><span class="agent">Codex</span><span class="model">gpt-5.6-sol</span></td>
-            <td><span class="agent">Claude</span><span class="model">fable</span></td>
+            <td><span class="agent">Claude</span><span class="model">(セッション既定)</span></td>
+            <td><span class="agent">Claude</span><span class="model">(セッション既定)</span></td>
+            <td><span class="agent">Claude</span><span class="model">(セッション既定)</span></td>
+            <td><span class="agent">Claude</span><span class="model">(セッション既定)</span></td>
           </tr>
         </tbody>
       </table>
@@ -204,46 +203,39 @@
     <details>
       <summary>ログと補足を表示</summary>
       <div class="dbody">
-<pre>session_id: loop-20260712-105300
-score_history: [97]
+<pre>session_id: loop-20260712-113000
+score_history: [96]
 events: なし（リトライ・停止の記録は発生していません）
 
 --- 変更ファイル一覧（git status） ---
  M src/main/index.ts
- M src/preload/index.ts
- M src/renderer/index.html
- M src/renderer/renderer.ts
- M src/shared/types.d.ts
-?? src/main/app-restart.ts（新規）
-?? tests/app-restart.test.ts（新規）
+?? src/main/notify-policy.ts（新規）
+?? tests/notify-policy.test.ts（新規）
 
---- 検証結果（実装役 report より） ---
+--- 検証結果 ---
 npm run typecheck: exit 0
 npm run lint: exit 0
-npm test: exit 0（26 ファイル / 234 テスト全通過）
+npm test: exit 0（27 ファイル / 241 テスト全通過）
 既存 tests/ 配下ファイルの改変なし（新規追加のみ）
 
 --- 採点係 feedback（全文） ---
-合格（97/100、閾値 90）。床は全て実測で○: F1 npm run typecheck exit 0 / F2 npm run lint exit 0 / F3 npm test exit 0（26 ファイル 234 テスト全通過。git status は既存 tests/ の改変なし、新規は tests/app-restart.test.ts のみ）/ F4 index.html の #btn-restart（title・aria-label「アプリを再起動」）＋ renderer.ts の api.windowAction("restart") 結線あり / F5 types.d.ts に WindowAction 型を新設し preload の windowAction が "restart" を受ける / F6 src/main/app-restart.ts の createAppRestarter が app.relaunch()→app.exit(0) を正順で実行し、index.ts の window-action ハンドラに結線済み / F7 tests/app-restart.test.ts（6 テスト）追加。
+合格（score 96 >= 90）。実測結果: npm run typecheck exit 0 / npm run lint exit 0 / npm test exit 0（27 files, 241 tests, 全通過）。git status --porcelain と git diff --stat -- tests/ ':!tests/notify-policy.test.ts' で既存 tests/ 配下ファイルの改変ゼロを確認（notify-policy.test.ts のみ新規追加）。src/main/index.ts の onEvent 内で result.state が 'done'/'confirm' のとき shouldNotify(lastNotifiedState.get(sessionId), result.state) の真時のみ showSessionToast → new Notification(...) を実際に呼んでおり（ログのみの偽実装ではない）、F4/F5 を満たす。state-store.ts の mapEventToState で Stop→done・Notification→confirm の対応も確認済み。過剰通知抑制はセッション単位の Map で前回通知状態を追跡し、同一状態への再遷移を shouldNotify で弾く設計で、tests/notify-policy.test.ts が 7 ケース（初回遷移・状態遷移・同一状態再遷移・対象外状態）を過不足なくカバーしている。showDisconnectToast を showSessionToast に共通化し、Notification.isSupported() ガード・silent:true・クリック前面化を 3 種の通知で完全に共有した点は既存パターンとの整合として高評価。
 
-観点: 妥当性・安全性は 90 アンカー超え — relaunch を exit より先に予約、requestSingleInstanceLock との競合をコメントで明示的に整理（旧プロセス終了後に新プロセス起動）、app.exit() が will-quit を発火しない点を踏まえ event-server close ＋ livenessTimer 停止を明示 cleanup（3 秒タイムアウト・失敗許容付き）、再入ガードで relaunch の多重予約を防止。UI/UX は確認ダイアログ（既定＝キャンセル、影響と「再接続」での復元手順を明記）で誤操作防止が実装済み。一貫性は既存 window-action IPC と confirmAndUnregister のダイアログパターンに正確に追従し、3 ファイルに重複していたアクション union を WindowAction 型に集約する改善まで含む。
-
-残課題（次周回があれば）:
-(1) F7 の新規テストは createAppRestarter モジュール単体の検証で、IPC ディスパッチ（キャンセル時に不起動／確認時に一度だけ起動）のテストは未追加。
-(2) 実機 E2E 証跡（PID 変化・再起動後の event-server 再 listen）が未実施。
-(3) 軽微: 再起動ボタンはアイコンのみで「表示のリロード」と誤読される余地があるが、ツールチップと確認ダイアログで実害は防止済み。
+次周回があれば以下は加点余地（合格には影響しないが残課題として記録）:
+1) src/main/index.ts:216 の showSessionToast(_projectName: string, ...) は本文が呼び出し側で完成済みのため _projectName が未使用のまま（ESLint の argsIgnorePattern: '^_' で lint は通るが、両呼び出し側が無意味な引数を渡し続けるだけの死んだパラメータになっている）。関数シグネチャから projectName を削除するか、逆に本文組み立てを showSessionToast 側に寄せて重複文字列展開（${project.name}: ...）を1箇所に統一する方が既存パターンとの整合スコアが上がる。
+2) lastNotifiedState（Map&lt;string, SessionState&gt;）はセッション終了後も削除されないため、長時間稼働で微小なメモリ増加が起き得る（session-store 側で管理しているセッション削除タイミングに合わせた delete が無い）。criteria 上は未評価だが次の改善候補。
+3) confirm 通知の本文『権限確認や入力待ちが発生しています。』は classifyNotification(message) が既に permission/idle/other を判別しているのにその区別を通知文面に活かしていない。文面の分かりやすさをさらに上げるなら種別ごとに一言変えると良い（現状でも90点アンカーの『一目でわかる』水準は満たしている）。
 
 --- 採点内訳（quality.breakdown） ---
 F1_typecheck: 100
 F2_lint: 100
 F3_test: 100
-F4_ui: 100
-F5_preload_api: 100
-F6_main_restart: 100
-F7_new_test: 90
-実装の妥当性・安全性: 95
-UI/UX・誤操作防止: 93
-コードとの一貫性: 95</pre>
+F4_done_notify: 100
+F5_confirm_notify: 100
+F6_new_test: 100
+既存パターンとの整合: 90
+過剰通知の抑制: 92
+メッセージの分かりやすさ: 88</pre>
       </div>
     </details>
   </section>
