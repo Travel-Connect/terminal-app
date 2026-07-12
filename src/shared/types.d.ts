@@ -14,6 +14,8 @@ export type SessionState = "waiting" | "running" | "done" | "confirm" | "error" 
 
 export type ThemeSetting = "light" | "dark" | "auto";
 
+export type WindowAction = "minimize" | "maximize" | "close" | "restart";
+
 /** projects.json の 1 エントリ（design.md 9 章） */
 export interface Project {
   id: string;
@@ -111,7 +113,8 @@ export interface TerminalAppApi {
   focusProject(id: string): Promise<FocusResult>;
   /** タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除） */
   showTileMenu(id: string): Promise<void>;
-  windowAction(action: "minimize" | "maximize" | "close"): void;
+  /** restart はアプリ自体を再起動する（main 側で確認ダイアログを挟む）。 */
+  windowAction(action: WindowAction): void;
   /** NFR-01 計測用: スナップショット描画完了を main へ通知（受信→描画のログ差分計測） */
   notifyRendered(revision: number): void;
   onSnapshot(cb: (snap: Snapshot) => void): void;

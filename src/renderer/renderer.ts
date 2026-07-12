@@ -364,6 +364,7 @@ function wireControls(): void {
     switchView("main");
     render();
   });
+  $("#btn-restart").addEventListener("click", () => api.windowAction("restart"));
   $("#btn-min").addEventListener("click", () => api.windowAction("minimize"));
   $("#btn-max").addEventListener("click", () => api.windowAction("maximize"));
   $("#btn-close").addEventListener("click", () => api.windowAction("close"));

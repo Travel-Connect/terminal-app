@@ -15,7 +15,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from "electro
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, OpResult, RegisterResult, Snapshot, ThemeSetting } from "../shared/types";
+import type { ClickTarget, OpResult, RegisterResult, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
@@ -161,6 +162,26 @@ function createAppEventServer(): EventServer {
 /* ---------------- 切断検知（260712_2） ---------------- */
 
 let livenessTimer: NodeJS.Timeout | null = null;
+
+const appRestarter = createAppRestarter({
+  cleanup: async () => {
+    // app.exit() は will-quit を発火しないため、再起動経路では定期処理とサーバを明示的に止める。
+    if (livenessTimer !== null) {
+      clearInterval(livenessTimer);
+      livenessTimer = null;
+    }
+    await (eventServer?.close() ?? Promise.resolve());
+  },
+  relaunch: () => {
+    // 引数なしの relaunch は argv/cwd（--demo 等を含む）を引き継ぐ。
+    // 旧プロセスの終了後に新プロセスを起動するため、requestSingleInstanceLock と競合しない。
+    app.relaunch();
+  },
+  // app.quit() と異なり終了イベントで阻止されない。必要な後始末は cleanup で完了させる。
+  exit: (code) => app.exit(code),
+  // Logger は同期追記のため、exit 直前の記録もファイルへ残る。
+  log: (message) => logger.info(message),
+});
 
 function statMtimeMs(p: string): number | null {
   try {
@@ -342,6 +363,22 @@ async function confirmAndUnregister(id: string): Promise<void> {
   }
 }
 
+/** アプリ再起動はセッション表示を失うため、既存の破壊的操作と同じく main 側で確認する。 */
+async function confirmAndRestart(): Promise<void> {
+  if (win === null) return;
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    title: "再起動",
+    message: "terminal-app を再起動しますか？",
+    detail: "セッション表示（メモリ上の状態）は一旦消えます。必要ならタイル右クリック →「再接続」で復元できます。",
+    buttons: ["再起動", "キャンセル"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response === 0) await appRestarter.restart();
+}
+
 function wireIpc(): void {
   ipcMain.handle("get-snapshot", () => buildSnapshot());
 
@@ -397,13 +434,14 @@ function wireIpc(): void {
     return outcome;
   });
 
-  ipcMain.on("window-action", (_e, action: "minimize" | "maximize" | "close") => {
+  ipcMain.on("window-action", (_e, action: WindowAction) => {
     if (win === null) return;
     if (action === "minimize") win.minimize();
     else if (action === "maximize") {
       if (win.isMaximized()) win.unmaximize();
       else win.maximize();
     } else if (action === "close") win.close(); // 閉じる = アプリ終了（design.md 6.1）
+    else if (action === "restart") void confirmAndRestart();
   });
 
   ipcMain.on("notify-rendered", (_e, rev: number) => {

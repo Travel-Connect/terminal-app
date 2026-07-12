@@ -3,7 +3,7 @@
  * 型定義は src/shared/types.d.ts の TerminalAppApi を正とする。
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ClickTarget, Snapshot, TerminalAppApi, ThemeSetting } from "../shared/types";
+import type { ClickTarget, Snapshot, TerminalAppApi, ThemeSetting, WindowAction } from "../shared/types";
 
 const api: TerminalAppApi = {
   getSnapshot: () => ipcRenderer.invoke("get-snapshot"),
@@ -15,7 +15,7 @@ const api: TerminalAppApi = {
   setPinned: (value: boolean) => ipcRenderer.invoke("set-pinned", value),
   focusProject: (id: string) => ipcRenderer.invoke("focus-project", id),
   showTileMenu: (id: string) => ipcRenderer.invoke("show-tile-menu", id),
-  windowAction: (action: "minimize" | "maximize" | "close") => ipcRenderer.send("window-action", action),
+  windowAction: (action: WindowAction) => ipcRenderer.send("window-action", action),
   notifyRendered: (revision: number) => ipcRenderer.send("notify-rendered", revision),
   onSnapshot: (cb: (snap: Snapshot) => void) => {
     ipcRenderer.on("snapshot", (_event, snap: Snapshot) => cb(snap));
