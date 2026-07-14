@@ -11,10 +11,18 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { TRANSCRIPT_STALE_HARD_MS } from "./liveness-monitor";
 import { extractWorkText, normalizePath } from "./state-store";
 
-/** transcript がこの時間以内に更新されていれば「動作中」として復元対象にする（切断判定の TRANSCRIPT_STALE_MS と対称） */
-export const RECONNECT_ACTIVE_MS = 180_000;
+/**
+ * transcript がこの時間以内に更新されていれば「動作中」として復元対象にする（260712_7）。
+ * 切断検知の HARD 閾値（ウィンドウが残っていても切断とみなす基準。liveness-monitor.ts）に
+ * バッファを足した値にする。旧実装は切断検知の TRANSCRIPT_STALE_MS（3分）と対称にしていたが、
+ * ウィンドウが残っている限り実際の切断判定は HARD 側の 15 分ルートを通るため、
+ * 「切断」と表示された時点で transcript は必ず HARD 閾値ぶん無更新済みで、再接続の窓が
+ * 常に手遅れになっていた（実測: product-register, 2026-07-12 08:06 切断 → 08:07 再接続失敗）。
+ */
+export const RECONNECT_ACTIVE_MS = TRANSCRIPT_STALE_HARD_MS + 5 * 60_000;
 
 /** transcript 末尾の走査量。直近のレコードから cwd 検証と workText 抽出ができれば足りる */
 const TAIL_BYTES = 256 * 1024;
