@@ -15,7 +15,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from "electro
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, OpResult, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, OpResult, Project, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
@@ -153,9 +153,9 @@ function createAppEventServer(): EventServer {
         const project = projectStore.getProject(result.projectId);
         if (project !== null) {
           if (result.state === "done") {
-            showSessionToast(project.name, `${project.name}: セッションが完了しました`, "応答が完了しました。");
+            showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
           } else if (result.state === "confirm") {
-            showSessionToast(project.name, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
+            showSessionToast(project, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
           }
         }
       }
@@ -208,27 +208,43 @@ function statMtimeMs(p: string): number | null {
   }
 }
 
+/** terminal-app 自体のウィンドウを前面化する（通知クリックのフォールバック・従来のクリック挙動） */
+function focusOwnWindow(): void {
+  if (win === null) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
 /**
- * Windows トースト通知の共通発火処理（260712_2 で導入、260712_5 で汎用化）。
- * `Notification.isSupported()` ガード・`silent: true`・クリックで前面化、を 1 箇所に集約する。
+ * Windows トースト通知の共通発火処理（260712_2 で導入、260712_5 で汎用化、260712_6 でクリック時の
+ * 前面化先を対象プロジェクトへ変更）。
+ * `Notification.isSupported()` ガード・`silent: true`、を 1 箇所に集約する。
+ * クリック時: project が特定できればタイルクリックと同じ `focusProjectWindow` で対象アプリを
+ * 前面化する（design.md 7.2 の手順。本アプリがフォアグラウンド＝クリック直後のため
+ * SetForegroundWindow の権限内）。対象が見つからない・project が無い場合は terminal-app 自体を
+ * 前面化するフォールバックにする（何も起きないより、タイル一覧からの手動操作に繋げられる方がよい）。
  * 通知音は REQ-12（次期）まで鳴らさない = silent 固定。
  */
-function showSessionToast(_projectName: string, title: string, body: string): void {
+function showSessionToast(project: Project | null, title: string, body: string): void {
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body, silent: true });
   n.on("click", () => {
-    if (win === null) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    if (project === null) {
+      focusOwnWindow();
+      return;
+    }
+    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
+    logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
+    if (!outcome.ok) focusOwnWindow();
   });
   n.show();
 }
 
 /** 切断トースト（260712_2） */
-function showDisconnectToast(projectName: string): void {
+function showDisconnectToast(project: Project | null, projectName: string): void {
   showSessionToast(
-    projectName,
+    project,
     `${projectName}: セッションが切断されました`,
     "終了の合図が届かないまま更新が止まりました。タイル右クリック →「再接続」で拾い直せます。"
   );
@@ -274,7 +290,7 @@ function sweepLiveness(): void {
     const project = projectStore.getProject(t.projectId);
     const name = project?.name ?? t.projectId;
     logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶`);
-    showDisconnectToast(name);
+    showDisconnectToast(project, name);
   }
   if (changed) broadcast();
 }
