@@ -5,7 +5,7 @@
   "description": "Claude Code 並行セッション監視タイルダッシュボード（Windows 11 常駐・Electron）",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "lint": "eslint src tests scripts",
     "test": "vitest run",
