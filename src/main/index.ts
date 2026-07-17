@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ClickTarget, OpResult, Project, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
@@ -376,6 +377,22 @@ function reconnectProject(id: string): void {
   );
 }
 
+/**
+ * 立ち上げ（260717_1）: 閉じていた Cursor / ターミナルをプロジェクトフォルダ付きで起動する手動導線。
+ * 前面化（focusProject）は既存ウィンドウ限定のため、アプリを閉じた後の復帰はこちらを使う。
+ * 起動後のセッション復元は従来どおり「再接続」（イベントが届けば自動でも再表示される）。
+ */
+function launchProject(id: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  const appName = project.clickTarget === "cursor" ? "Cursor" : "ターミナル";
+  const outcome = launchProjectApp(project.clickTarget, project.path);
+  logger.info(
+    `立ち上げ ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`
+  );
+  setStatus(outcome.ok ? `${project.name} を ${appName} で立ち上げました` : (outcome.message ?? "立ち上げに失敗しました"));
+}
+
 /** 表示クリア（260712_2）: タイルのセッション表示のみ消す（登録・hooks は維持。次のイベントで再表示される） */
 function clearProjectDisplay(id: string): void {
   const project = projectStore.getProject(id);
@@ -436,7 +453,12 @@ function wireIpc(): void {
   ipcMain.handle("show-tile-menu", (_e, id: string) => {
     const project = projectStore.getProject(id);
     if (project === null || win === null) return;
+    const launchLabel =
+      project.clickTarget === "cursor"
+        ? "立ち上げる（Cursor でこのフォルダを開く）"
+        : "立ち上げる（ターミナルをこのフォルダで開く）";
     const menu = Menu.buildFromTemplate([
+      { label: launchLabel, click: () => { launchProject(id); } },
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
       { type: "separator" },
