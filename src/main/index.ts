@@ -11,7 +11,7 @@
  *   --theme=<t>          テーマの一時上書き（light / dark / auto。ライトモード証跡用）
  *   --view=settings      設定画面を初期表示で開く（面 1d / 1f の証跡用）
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -19,6 +19,7 @@ import type { ClickTarget, OpResult, Project, RegisterResult, SessionState, Snap
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
+import { detectDevScript, DevServerManager } from "./dev-server";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
 import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected } from "./liveness-monitor";
@@ -188,6 +189,7 @@ const appRestarter = createAppRestarter({
       clearInterval(livenessTimer);
       livenessTimer = null;
     }
+    await devServers.stopAll(); // 起動した開発サーバーを残さない（260722_1）
     await (eventServer?.close() ?? Promise.resolve());
   },
   relaunch: () => {
@@ -325,9 +327,16 @@ function registerProject(dirPath: string): RegisterResult {
 }
 
 /** 登録解除の本体（設定画面の IPC と右クリックメニューの両方から呼ぶ。260712_2 でハンドラから抽出） */
-function unregisterProjectById(id: string): OpResult {
+async function unregisterProjectById(id: string): Promise<OpResult> {
   const project = projectStore.getProject(id);
   if (project === null) return { ok: false, error: "プロジェクトが見つかりません" };
+  // 起動中の開発サーバーは、タイル（= 停止導線）が消える前に止める（260722_1 レビュー指摘）
+  if (devServers.isRunning(id)) {
+    const stopped = await devServers.stop(id);
+    logger.info(
+      `dev-server 停止（登録解除に伴う）${stopped.ok ? "成功" : "失敗"}: ${project.name}${stopped.error !== undefined ? ` — ${stopped.error}` : ""}`
+    );
+  }
   const removed = removeHooks(project.path, ALL_HOOK_EVENTS);
   if (!removed.ok) {
     // design.md 4.2 除去: パース失敗時は中断（手動対応を促す）。登録は残す
@@ -377,6 +386,103 @@ function reconnectProject(id: string): void {
   );
 }
 
+/* ---------------- 開発サーバー起動・停止（260722_1） ---------------- */
+
+/**
+ * タイル右クリック →「ブラウザで開く」の本体。起動〜URL 検出〜ブラウザ表示〜停止を
+ * DevServerManager に委ね、ここでは UI 通知（ステータスバー・ログ）とブラウザ起動だけを行う。
+ * サーバー出力は CP932 / UTF-8 自動判別でデコード済みの行が届く（dev-server.ts）
+ */
+const devServers = new DevServerManager({
+  onUrl: (projectId, url) => {
+    const project = projectStore.getProject(projectId);
+    const name = project?.name ?? projectId;
+    logger.info(`dev-server URL 検出: ${name} → ${url}`);
+    void shell.openExternal(url);
+    setStatus(`${name} をブラウザで開きました（${url}）`);
+  },
+  onUrlTimeout: (projectId) => {
+    const name = projectStore.getProject(projectId)?.name ?? projectId;
+    logger.warn(`dev-server URL 未検出: ${name} — サーバーは起動継続`);
+    setStatus(`${name}: サーバーは起動しましたが URL を検出できませんでした（右クリック → 停止で終了できます）`);
+  },
+  onExit: (projectId, code) => {
+    const name = projectStore.getProject(projectId)?.name ?? projectId;
+    logger.info(`dev-server 終了: ${name} (code=${String(code)})`);
+    setStatus(`${name} の開発サーバーが終了しました${code !== null && code !== 0 ? `（code=${code}）` : ""}`);
+  },
+  onLine: (projectId, line, stream) => {
+    if (line.trim() === "") return;
+    const name = projectStore.getProject(projectId)?.name ?? projectId;
+    if (stream === "stderr") logger.warn(`dev-server[${name}] ${line}`);
+    else logger.info(`dev-server[${name}] ${line}`);
+  },
+});
+
+function startDevServer(id: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  const result = devServers.start({ id, path: project.path });
+  logger.info(
+    `dev-server 起動 ${result.ok ? "受理" : "失敗"}: ${project.name}${result.scriptName !== undefined ? ` (npm run ${result.scriptName})` : ""}${result.error !== undefined ? ` — ${result.error}` : ""}`
+  );
+  setStatus(
+    result.ok
+      ? `${project.name} の開発サーバーを起動中（npm run ${result.scriptName}）… URL 検出後にブラウザを開きます`
+      : (result.error ?? "開発サーバーの起動に失敗しました")
+  );
+}
+
+async function stopDevServer(id: string): Promise<void> {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  const result = await devServers.stop(id);
+  logger.info(`dev-server 停止 ${result.ok ? "成功" : "失敗"}: ${project.name}${result.error !== undefined ? ` — ${result.error}` : ""}`);
+  setStatus(result.ok ? `${project.name} の開発サーバーを停止しました` : (result.error ?? "停止に失敗しました"));
+}
+
+/**
+ * タイルメニューの開発サーバー項目（260722_1）。
+ * 未起動: 「ブラウザで開く」（スクリプト未検出のタイルは無効表示で誤操作防止）
+ * 起動中: 「サーバー停止」＋（URL 検出済みなら）「ブラウザで再度開く」
+ */
+function devServerMenuItems(id: string, projectPath: string): Electron.MenuItemConstructorOptions[] {
+  const running = devServers.get(id);
+  if (running === null) {
+    const script = detectDevScript(projectPath);
+    return [
+      {
+        label:
+          script !== null
+            ? `ブラウザで開く（npm run ${script.name} を起動）`
+            : "ブラウザで開く（開発サーバーのスクリプトなし）",
+        enabled: script !== null,
+        click: () => {
+          startDevServer(id);
+        },
+      },
+    ];
+  }
+  const items: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: `サーバー停止（${running.url ?? "URL 検出中"}）`,
+      click: () => {
+        void stopDevServer(id);
+      },
+    },
+  ];
+  if (running.url !== undefined) {
+    const url = running.url;
+    items.push({
+      label: "ブラウザで再度開く",
+      click: () => {
+        void shell.openExternal(url);
+      },
+    });
+  }
+  return items;
+}
+
 /**
  * 立ち上げ（260717_1）: 閉じていた Cursor / ターミナルをプロジェクトフォルダ付きで起動する手動導線。
  * 前面化（focusProject）は既存ウィンドウ限定のため、アプリを閉じた後の復帰はこちらを使う。
@@ -417,7 +523,7 @@ async function confirmAndUnregister(id: string): Promise<void> {
     noLink: true,
   });
   if (response === 0) {
-    const result = unregisterProjectById(id);
+    const result = await unregisterProjectById(id);
     if (!result.ok && result.error !== undefined) setStatus(result.error);
   }
 }
@@ -459,6 +565,7 @@ function wireIpc(): void {
         : "立ち上げる（ターミナルをこのフォルダで開く）";
     const menu = Menu.buildFromTemplate([
       { label: launchLabel, click: () => { launchProject(id); } },
+      ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
       { type: "separator" },
@@ -642,6 +749,7 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   if (livenessTimer !== null) clearInterval(livenessTimer);
+  void devServers.stopAll(); // 開発サーバーを残さない（260722_1）
   void eventServer?.close();
   logger.info("terminal-app 終了");
 });
