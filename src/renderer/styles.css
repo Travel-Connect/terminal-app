@@ -145,7 +145,7 @@ body {
     0 1px 3px var(--shadow);
 }
 
-/* --- キーの下から漏れる光（NFR-06: 約 2.4s の呼吸。点滅させない） --- */
+/* --- キーの下から漏れる光（NFR-06: 完了は約 2.4s の呼吸。確認待ちだけは 260904_1 #2 で青の点滅） --- */
 .tile-glow {
   position: absolute;
   left: 10%; right: 10%; bottom: -7px;
@@ -159,11 +159,21 @@ body {
   0%, 100% { opacity: 0.22; }
   50%      { opacity: 0.95; }
 }
+/* 点滅（260904_1 #2: 確認待ち = 青で 1 秒周期。0.5 秒点灯 / 0.5 秒消灯のはっきりした明滅） */
+@keyframes blink {
+  0%, 49.9% { opacity: 1; }
+  50%, 100% { opacity: 0.12; }
+}
 .tile.state-done .tile-glow    { background: var(--green); animation: breath 2.4s ease-in-out infinite; }
-.tile.state-confirm .tile-glow { background: var(--amber); animation: breath 2.4s ease-in-out infinite; }
+.tile.state-confirm .tile-glow { background: var(--accent); opacity: 1; animation: blink 1s step-end infinite; }
 .tile.state-error .tile-glow   { background: var(--red); opacity: 0.75; animation: none; } /* 動かない赤 */
+/* 確認待ちはタイル枠も青くして、光が隠れる密集配置でも点滅が見えるようにする */
+.tile.state-confirm { border-color: rgba(96, 165, 250, 0.7); }
 
-.tile-head { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+/* 見出し（260904_1 #1）: 1 行目 = 名前（＋分割番号）、2 行目 = 手動ステータスバッジ。
+   旧配置（名前とバッジが横並び）は名前側だけが縮んで「商品登…」のように切れていた */
+.tile-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+.tile-name-row { display: flex; align-items: center; gap: 5px; max-width: 100%; }
 
 .tile-name {
   font-weight: 600;
@@ -173,6 +183,15 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 分割タイルの番号（260904_1 #3: 同じプロジェクトの何本目のターミナルか。起動順） */
+.tile-seq {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 /* 手動ステータスバッジ（260727_1）: 自動検知の状態表示と混ざらない控えめなピル */
@@ -186,6 +205,9 @@ body {
   background: rgba(128, 140, 160, 0.14);
   color: var(--text-dim);
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tile-center { display: flex; align-items: center; gap: 6px; min-height: 20px; max-width: 100%; }
@@ -204,7 +226,7 @@ body {
 
 .tile-icon { font-size: 15px; font-weight: 700; display: none; }
 .tile.state-done .tile-icon    { display: inline; color: var(--green); }
-.tile.state-confirm .tile-icon { display: inline; color: var(--amber); }
+.tile.state-confirm .tile-icon { display: inline; color: var(--accent); animation: blink 1s step-end infinite; } /* 260904_1 #2: 青で点滅 */
 .tile.state-error .tile-icon   { display: inline; color: var(--red); }
 .tile.state-waiting .tile-icon { display: inline; color: var(--text-dim); }
 .tile.state-disconnected .tile-icon { display: inline; color: var(--text-dim); } /* 切断 = 沈黙（発光なし。260712_2） */
@@ -223,7 +245,7 @@ body {
 
 .tile-status { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .tile.state-done .tile-status    { color: var(--green); }
-.tile.state-confirm .tile-status { color: var(--amber); }
+.tile.state-confirm .tile-status { color: var(--accent); } /* 260904_1 #2: 文字は読みやすさ優先で青の点灯のみ */
 .tile.state-error .tile-status   { color: var(--red); }
 
 /* 切断（260712_2）: 生きていないことを一目で伝える — タイル全体を沈ませ、作業テキストも消灯 */
@@ -239,6 +261,7 @@ body {
 .tile.is-unlinked .tile-work,
 .tile.is-unlinked .tile-status,
 .tile.is-unlinked .tile-icon { color: var(--text-dim); }
+.tile.is-unlinked { border-color: var(--border); }
 
 /* 全タイルが未接続で非表示のとき（260903_1）。未登録の空状態（面 1c）とは別の案内 */
 #all-hidden-note {
@@ -368,7 +391,18 @@ body {
 .project-info { min-width: 0; }
 .project-name { font-weight: 600; font-size: 12.5px; }
 .project-path { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-bounds { font-size: 10.5px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 260904_1 #3 */
 .project-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* ウィンドウ位置の一括操作（260904_1 #3 / 設定画面） */
+.bounds-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.btn-wide {
+  flex: 1; min-width: 0;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.btn-wide:hover { border-color: var(--accent); color: var(--accent); background: rgba(96, 165, 250, 0.08); }
 
 /* 登録解除（モック未記載・設計追加: design.md 6.4 — 行末の控えめなアイコン） */
 .btn-remove {

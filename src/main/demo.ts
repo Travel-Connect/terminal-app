@@ -20,6 +20,11 @@ interface DemoSeed {
   status?: string;
   /** 未接続（260903_1 の灰色表示確認用。実運用では対象アプリのウィンドウ有無を EnumWindows で判定） */
   unlinked?: boolean;
+  /**
+   * 同じプロジェクトの 2 本目以降のセッション（260904_1 #3 の分割タイル確認用）。
+   * 実運用では同じフォルダで複数の claude が動いていると自動で分かれる
+   */
+  extra?: Array<{ state: SessionState; ago: number; work?: string }>;
 }
 
 /** モック面 1b の 12 タイル構成（context-design-mock.md） */
@@ -40,7 +45,8 @@ const MOCK_1B: DemoSeed[] = [
 
 const EXTRA_16: DemoSeed[] = [
   { name: "需要予測-app", state: "done", ago: 300 },
-  { name: "棚割り-app", state: "confirm", ago: 30 },
+  // 分割タイル（260904_1 #3）: 1 つの Cursor で 2 本の claude（① 確認待ち / ② 実行中）
+  { name: "棚割り-app", state: "confirm", ago: 30, work: "棚割り表の再計算をして", status: "作業中", extra: [{ state: "running", ago: 3 * 60 + 20, work: "テストを全部通して" }] },
   { name: "画像生成-app", state: "error", ago: 600 },
   { name: "監査ログ-app", state: "waiting-none", ago: 0, unlinked: true }, // 待機（イベント未受信）タイルの確認用（未接続）
 ];
@@ -74,6 +80,18 @@ export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, cou
       runningSince: seed.state === "running" ? now - seed.ago * 1000 : undefined,
       lastMessage: seed.state === "confirm" ? "Claude needs your permission to use Bash" : undefined,
       workText: seed.work,
+      firstSeenAt: now - 3600_000, // 1 本目が先に起動した想定（分割時の並び順）
+    });
+    (seed.extra ?? []).forEach((ex, j) => {
+      stateStore.seedSession({
+        sessionId: `s-${id}-${j + 2}`,
+        projectId: id,
+        state: ex.state,
+        lastEventAt: now - ex.ago * 1000,
+        runningSince: ex.state === "running" ? now - ex.ago * 1000 : undefined,
+        workText: ex.work,
+        firstSeenAt: now - 3600_000 + (j + 1) * 60_000,
+      });
     });
   });
   return presence;

@@ -22,9 +22,28 @@ export interface TopLevelWindow {
 }
 
 const SW_RESTORE = 9;
+const SW_SHOWNORMAL = 1;
+const SW_SHOWMINIMIZED = 2;
+const SW_SHOWMAXIMIZED = 3;
+/** WINDOWPLACEMENT.flags: 最小化中のウィンドウが復元時に最大化へ戻る */
+const WPF_RESTORETOMAXIMIZED = 0x0002;
+/** MonitorFromRect: どのモニタにも掛からなければ NULL */
+const MONITOR_DEFAULTTONULL = 0;
 const VK_MENU = 0x12;
 const KEYEVENTF_KEYUP = 0x0002;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+/** ウィンドウ配置（260904_1 #3）。GetWindowPlacement の通常時矩形 ＋ 表示状態 */
+export interface WindowPlacementInfo {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+  minimized: boolean;
+}
+
+export type PlacementResult = { ok: true; placement: WindowPlacementInfo } | { ok: false; message: string };
 
 /** clickTarget → 対象プロセス exe 名（design.md 7.1） */
 const TARGET_EXES: Record<ClickTarget, string[]> = {
@@ -58,6 +77,11 @@ interface Win32Api {
   QueryFullProcessImageNameW: any;
   CloseHandle: any;
   GetCurrentThreadId: any;
+  /** ウィンドウ位置の記憶／復元（260904_1 #3） */
+  GetWindowPlacement: any;
+  SetWindowPlacement: any;
+  MonitorFromRect: any;
+  WINDOWPLACEMENT: any;
 }
 
 let cached: Win32Api | null | undefined;
@@ -73,6 +97,17 @@ function loadApi(): Win32Api | null {
     const user32 = koffi.load("user32.dll");
     const kernel32 = koffi.load("kernel32.dll");
     const EnumWindowsProc = koffi.proto("bool __stdcall EnumWindowsProc(void *hwnd, intptr_t lParam)");
+    // ウィンドウ位置の記憶／復元（260904_1 #3）用の構造体。名前はプロセス内で一意なら何でもよい
+    const POINT = koffi.struct("TA_POINT", { x: "int32", y: "int32" });
+    const RECT = koffi.struct("TA_RECT", { left: "int32", top: "int32", right: "int32", bottom: "int32" });
+    const WINDOWPLACEMENT = koffi.struct("TA_WINDOWPLACEMENT", {
+      length: "uint32",
+      flags: "uint32",
+      showCmd: "uint32",
+      ptMinPosition: POINT,
+      ptMaxPosition: POINT,
+      rcNormalPosition: RECT,
+    });
     cached = {
       koffi,
       EnumWindowsProc,
@@ -94,6 +129,10 @@ function loadApi(): Win32Api | null {
       ),
       CloseHandle: kernel32.func("bool __stdcall CloseHandle(void *h)"),
       GetCurrentThreadId: kernel32.func("uint32_t __stdcall GetCurrentThreadId()"),
+      GetWindowPlacement: user32.func("bool __stdcall GetWindowPlacement(void *hwnd, _Inout_ TA_WINDOWPLACEMENT *wp)"),
+      SetWindowPlacement: user32.func("bool __stdcall SetWindowPlacement(void *hwnd, const TA_WINDOWPLACEMENT *wp)"),
+      MonitorFromRect: user32.func("void *__stdcall MonitorFromRect(const TA_RECT *rc, uint32_t flags)"),
+      WINDOWPLACEMENT,
     };
   } catch (e) {
     console.error(`window-control: koffi のロードに失敗しました: ${String(e)}`);
@@ -192,6 +231,17 @@ function isForeground(api: Win32Api, hwnd: any): boolean {
 }
 
 /**
+ * 対象プロジェクトのウィンドウ（hwnd）を探す。
+ * EnumWindows は Z 順（手前から）のため、最初の一致 = Z オーダー最前面（design.md 7.1）
+ */
+function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: string): any | null {
+  const wanted = TARGET_EXES[target];
+  const needle = folderName.toLowerCase();
+  const found = enumWindows(api).find((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+  return found === undefined ? null : found.hwnd;
+}
+
+/**
  * クリック → 前面化（design.md 3.2(c) / 7 章）。
  * folderName = プロジェクトのフォルダ basename（タイトル一致はヒューリスティック。design.md 7.1）
  */
@@ -201,18 +251,81 @@ export function focusProjectWindow(target: ClickTarget, folderName: string): Foc
     return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
   }
   try {
-    const wanted = TARGET_EXES[target];
-    const needle = folderName.toLowerCase();
-    // EnumWindows は Z 順（手前から）のため、最初の一致 = Z オーダー最前面（design.md 7.1）
-    const found = enumWindows(api).find(
-      (w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle)
-    );
-    if (found === undefined) {
+    const hwnd = findProjectWindow(api, target, folderName);
+    if (hwnd === null) {
       return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
     }
-    return bringToForeground(api, found.hwnd);
+    return bringToForeground(api, hwnd);
   } catch (e) {
     return { ok: false, message: `前面化に失敗しました: ${String(e)}` };
+  }
+}
+
+function emptyPlacement(api: Win32Api): any {
+  return {
+    length: api.koffi.sizeof(api.WINDOWPLACEMENT) as number,
+    flags: 0,
+    showCmd: 0,
+    ptMinPosition: { x: 0, y: 0 },
+    ptMaxPosition: { x: 0, y: 0 },
+    rcNormalPosition: { left: 0, top: 0, right: 0, bottom: 0 },
+  };
+}
+
+/**
+ * ウィンドウ位置の読み取り（260904_1 #3「ウィンドウ位置を記憶」）。
+ * GetWindowPlacement の rcNormalPosition（通常時の矩形。最大化・最小化中でも通常時の値が取れる）と
+ * 表示状態を返す。最小化中に最大化へ戻る設定（WPF_RESTORETOMAXIMIZED）も「最大化」として扱う。
+ */
+export function readProjectWindowPlacement(target: ClickTarget, folderName: string): PlacementResult {
+  const api = loadApi();
+  if (api === null) return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
+  try {
+    const hwnd = findProjectWindow(api, target, folderName);
+    if (hwnd === null) return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
+    const wp = emptyPlacement(api);
+    if (!(api.GetWindowPlacement(hwnd, wp) as boolean)) return { ok: false, message: "ウィンドウ配置を取得できませんでした" };
+    const rc = wp.rcNormalPosition as { left: number; top: number; right: number; bottom: number };
+    const showCmd = wp.showCmd as number;
+    const minimized = showCmd === SW_SHOWMINIMIZED;
+    const maximized = showCmd === SW_SHOWMAXIMIZED || (minimized && ((wp.flags as number) & WPF_RESTORETOMAXIMIZED) !== 0);
+    return {
+      ok: true,
+      placement: { x: rc.left, y: rc.top, width: rc.right - rc.left, height: rc.bottom - rc.top, maximized, minimized },
+    };
+  } catch (e) {
+    return { ok: false, message: `ウィンドウ配置の取得に失敗しました: ${String(e)}` };
+  }
+}
+
+/**
+ * ウィンドウ位置の適用（260904_1 #3「記憶した位置へ戻す」／「立ち上げる」直後の自動復元）。
+ * 記憶した矩形がどのモニタにも掛からない（モニタ構成が変わった等）ときは何もしない（画面外に飛ばさない）。
+ * 最小化中でも通常表示（または最大化）へ戻して配置する。
+ */
+export function applyProjectWindowPlacement(
+  target: ClickTarget,
+  folderName: string,
+  bounds: { x: number; y: number; width: number; height: number; maximized: boolean }
+): FocusOutcome {
+  const api = loadApi();
+  if (api === null) return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
+  try {
+    const hwnd = findProjectWindow(api, target, folderName);
+    if (hwnd === null) return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
+    const rect = { left: bounds.x, top: bounds.y, right: bounds.x + bounds.width, bottom: bounds.y + bounds.height };
+    if (api.MonitorFromRect(rect, MONITOR_DEFAULTTONULL) === null) {
+      return { ok: false, message: "記憶した位置が画面外のため復元しませんでした（モニタ構成の変更？）" };
+    }
+    const wp = emptyPlacement(api);
+    wp.showCmd = bounds.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+    wp.ptMinPosition = { x: -1, y: -1 };
+    wp.ptMaxPosition = { x: -1, y: -1 };
+    wp.rcNormalPosition = rect;
+    if (!(api.SetWindowPlacement(hwnd, wp) as boolean)) return { ok: false, message: "ウィンドウ配置の適用に失敗しました" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: `ウィンドウ配置の適用に失敗しました: ${String(e)}` };
   }
 }
 

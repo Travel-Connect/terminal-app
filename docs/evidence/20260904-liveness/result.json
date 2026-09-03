@@ -1,0 +1,8 @@
+{
+  "failures": [],
+  "alive": "e265d7a7-9cf0-4b39-bb57-6a0222dfc5b7",
+  "aliveEntrypoint": "claude-vscode",
+  "dead": "00000000-dead-4000-8000-000000000001",
+  "sweepMs": 2000,
+  "at": "2026-09-03T21:20:27.586Z"
+}

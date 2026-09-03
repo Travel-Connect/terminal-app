@@ -16,7 +16,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
@@ -24,16 +24,26 @@ import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
-import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected } from "./liveness-monitor";
+import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected, findResumedFromConfirm } from "./liveness-monitor";
 import { Logger } from "./logger";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
+import { classifyLiveness, readSessionRegistry, registryStatusOf } from "./session-registry";
 import { scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { classifyNotification, StateStore } from "./state-store";
-import { focusProjectWindow, hasWindowFor, isAvailable as windowApiAvailable, listTopLevelWindows, type TopLevelWindow } from "./window-control";
+import { classifyNotification, countTiles, StateStore } from "./state-store";
+import { fmtWindowBounds } from "./window-bounds";
+import {
+  applyProjectWindowPlacement,
+  focusProjectWindow,
+  hasWindowFor,
+  isAvailable as windowApiAvailable,
+  listTopLevelWindows,
+  readProjectWindowPlacement,
+  type TopLevelWindow,
+} from "./window-control";
 import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
 
 function argValue(name: string): string | undefined {
@@ -79,12 +89,22 @@ const pendingRender = new Map<number, number>();
 function buildSnapshot(): Snapshot {
   const config = { ...projectStore.config };
   if (themeOverride !== undefined) config.theme = themeOverride;
+  const projects = projectStore.projects;
+  const sessions = stateStore.displaySessions(projects);
+  const splitSessions = stateStore.splitSessions(projects);
+  // 件数は「画面に出るタイル」基準（260904_1 #3: 分割タイルはそれぞれ 1 件）。renderer は表示整形のみ行う
+  const tiles: SessionView[] = [];
+  for (const p of projects) {
+    const members = splitSessions[p.id];
+    if (members !== undefined) tiles.push(...members);
+    else if (sessions[p.id] !== undefined) tiles.push(sessions[p.id]);
+  }
   return {
     revision,
-    projects: [...projectStore.projects],
-    sessions: stateStore.displaySessions(projectStore.projects),
-    // 件数は StateStore.counts を正とし、renderer は表示整形のみ行う（重複実装の一本化）
-    counts: stateStore.counts(projectStore.projects),
+    projects: [...projects],
+    sessions,
+    splitSessions,
+    counts: countTiles(tiles),
     config,
     pinned,
     statusMessage,
@@ -204,6 +224,7 @@ const appRestarter = createAppRestarter({
       clearInterval(windowPollTimer);
       windowPollTimer = null;
     }
+    cancelAllPendingRestores();
     await devServers.stopAll(); // 起動した開発サーバーを残さない（260722_1）
     await (eventServer?.close() ?? Promise.resolve());
   },
@@ -269,17 +290,84 @@ function showDisconnectToast(project: Project | null, projectName: string): void
 }
 
 /**
- * 1 掃引: 実行中セッションについて
- * (1) 終了検知（260712_4）: transcript 終端がターン完了を示すものを「完了」へ —
+ * 登録簿で「終了」を何回連続で観測したら確定させるか（260904_1 #3）。
+ * 登録簿ファイルは status 変化のたびに書き換わるため、書き込み途中を読むと 1 回だけ「無い」に見える
+ */
+const DEAD_STRIKES_REQUIRED = 2;
+/** sessionId → 連続で終了と観測した回数 */
+const deadStrikes = new Map<string, number>();
+
+/**
+ * 1 掃引（15 秒ごと）:
+ * (0) 生死判定（260904_1 #3）: Claude Code の登録簿（~/.claude/sessions）と PID 存在で各セッションの
+ *     生死を反映する。終了したセッションは分割タイルから外れ、同じプロジェクトに生存があれば記録ごと破棄。
+ *     実行中のまま終了していれば「切断」へ（transcript の無更新を待たずに確定）。
+ * (1) 確認待ちからの復帰（260904_1 #2）: 許可後に作業が再開された（transcript 更新／登録簿 busy）
+ *     確認待ちセッションを「実行中」へ戻す。
+ * 以下は実行中セッションについて
+ * (2) 終了検知（260712_4）: transcript 終端がターン完了を示すものを「完了」へ —
  *     割り込み（Esc）では Stop hook が発火せず、実行中のまま取り残されるため。
  *     切断判定より先に行う（終了済みセッションを「切断」と誤表示しない）。
- * (2) 切断検知: transcript 更新時刻とウィンドウ存在で「切断」へ遷移 ＋ トースト通知。
+ * (3) 切断検知: transcript 更新時刻とウィンドウ存在で「切断」へ遷移 ＋ トースト通知。
  * ウィンドウ列挙（EnumWindows）は 1 掃引につき最大 1 回に抑える（遅延取得）。
  */
 function sweepLiveness(): void {
-  const targets = stateStore.runningSessions();
-  if (targets.length === 0) return;
   let changed = false;
+
+  const registry = readSessionRegistry();
+  if (registry !== null) {
+    for (const sid of stateStore.sessionIds()) {
+      if (classifyLiveness(registry, sid) === "alive") {
+        deadStrikes.delete(sid);
+        if (stateStore.setDead(sid, false)) changed = true;
+        continue;
+      }
+      const strikes = (deadStrikes.get(sid) ?? 0) + 1;
+      deadStrikes.set(sid, strikes);
+      if (strikes < DEAD_STRIKES_REQUIRED) continue;
+      if (stateStore.setDead(sid, true)) {
+        changed = true;
+        logger.info(`セッション終了を確認（登録簿にプロセスなし）: session=${sid}`);
+      }
+      if (stateStore.markDisconnected(sid)) {
+        changed = true;
+        logger.info(`実行中のまま終了 → 切断表示: session=${sid}`);
+      }
+    }
+    const pruned = stateStore.pruneDeadSessions();
+    for (const sid of pruned) {
+      deadStrikes.delete(sid);
+      lastNotifiedState.delete(sid);
+    }
+    if (pruned.length > 0) {
+      changed = true;
+      logger.info(`終了済みセッションの記録を破棄（同じプロジェクトに生存あり）: ${pruned.join(", ")}`);
+    }
+  }
+
+  const confirmTargets = stateStore.confirmSessions();
+  if (confirmTargets.length > 0) {
+    const resumed = findResumedFromConfirm(confirmTargets, {
+      now: () => Date.now(),
+      mtimeMs: statMtimeMs,
+      registryStatus: (sid) => registryStatusOf(registry, sid),
+    });
+    for (const hit of resumed) {
+      if (!stateStore.resumeFromConfirm(hit.target.sessionId)) continue;
+      changed = true;
+      lastNotifiedState.set(hit.target.sessionId, "running"); // 次の確認待ちで再び通知できるように
+      const project = projectStore.getProject(hit.target.projectId);
+      logger.info(
+        `確認待ちから復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${hit.reason === "registry" ? "登録簿 status=busy" : "許可後に transcript が更新"}`
+      );
+    }
+  }
+
+  const targets = stateStore.runningSessions();
+  if (targets.length === 0) {
+    if (changed) broadcast();
+    return;
+  }
 
   const concludedHits = findConcluded(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf });
   const concludedIds = new Set<string>();
@@ -548,6 +636,8 @@ function launchProject(id: string): void {
     `立ち上げ ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`
   );
   setStatus(outcome.ok ? `${project.name} を ${appName} で立ち上げました` : (outcome.message ?? "立ち上げに失敗しました"));
+  // 記憶したウィンドウ位置があれば、ウィンドウが現れ次第そこへ動かす（260904_1 #3）
+  if (outcome.ok && project.windowBounds !== undefined) scheduleRestoreAfterLaunch(project.id);
 }
 
 /** 表示クリア（260712_2）: タイルのセッション表示のみ消す（登録・hooks は維持。次のイベントで再表示される） */
@@ -557,6 +647,158 @@ function clearProjectDisplay(id: string): void {
   stateStore.removeProjectSessions(id);
   logger.info(`表示クリア: ${project.name}`);
   setStatus(`${project.name} の表示をクリアしました`);
+}
+
+/** 分割タイルの「この枠を消す」（260904_1 #3）: 1 セッションの表示だけ消す（次のイベントで再表示される） */
+function removeSessionDisplay(id: string, sessionId: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  if (!stateStore.removeSession(sessionId)) return;
+  deadStrikes.delete(sessionId);
+  lastNotifiedState.delete(sessionId);
+  logger.info(`枠を消去: ${project.name} (session=${sessionId})`);
+  setStatus(`${project.name} の枠を 1 つ消しました`);
+}
+
+/* ---------------- ウィンドウ位置の記憶／復元（260904_1 #3） ---------------- */
+
+/** 立ち上げ後の自動復元: ウィンドウ出現の待ち時間上限・出現後の落ち着き待ち・ポーリング間隔 */
+const LAUNCH_RESTORE_TIMEOUT_MS = 60_000;
+const LAUNCH_RESTORE_SETTLE_MS = 1_500;
+const LAUNCH_RESTORE_POLL_MS = 500;
+/** projectId → 進行中の自動復元タイマー（立ち上げの連打で重複させない） */
+const pendingRestores = new Map<string, NodeJS.Timeout>();
+
+function cancelPendingRestore(id: string): void {
+  const t = pendingRestores.get(id);
+  if (t !== undefined) {
+    clearInterval(t);
+    pendingRestores.delete(id);
+  }
+}
+
+function cancelAllPendingRestores(): void {
+  for (const id of [...pendingRestores.keys()]) cancelPendingRestore(id);
+}
+
+/** 「ウィンドウ位置を記憶」: 今のウィンドウ配置を projects.json に保存する */
+function saveWindowBounds(id: string, quiet = false): boolean {
+  const project = projectStore.getProject(id);
+  if (project === null) return false;
+  const r = readProjectWindowPlacement(project.clickTarget, path.basename(project.path));
+  if (!r.ok) {
+    logger.info(`ウィンドウ位置の記憶 失敗: ${project.name} — ${r.message}`);
+    if (!quiet) setStatus(`${project.name}: ${r.message}`);
+    return false;
+  }
+  const bounds: WindowBounds = {
+    x: r.placement.x,
+    y: r.placement.y,
+    width: r.placement.width,
+    height: r.placement.height,
+    maximized: r.placement.maximized,
+    savedAt: new Date().toISOString(),
+  };
+  if (!projectStore.setWindowBounds(id, bounds)) {
+    if (!quiet) setStatus(`${project.name}: ウィンドウ位置を保存できませんでした`);
+    return false;
+  }
+  logger.info(`ウィンドウ位置を記憶: ${project.name} → ${fmtWindowBounds(bounds)}`);
+  if (!quiet) setStatus(`${project.name} のウィンドウ位置を記憶しました ${fmtWindowBounds(bounds)}`);
+  else broadcast();
+  return true;
+}
+
+/** 「記憶した位置へ戻す」: 保存済みの配置を今のウィンドウに適用する */
+function restoreWindowBounds(id: string, quiet = false): boolean {
+  const project = projectStore.getProject(id);
+  if (project === null || project.windowBounds === undefined) return false;
+  const r = applyProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.windowBounds);
+  logger.info(`ウィンドウ位置を復元 ${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
+  if (!quiet) setStatus(r.ok ? `${project.name} のウィンドウを記憶した位置へ戻しました` : `${project.name}: ${r.message ?? "復元に失敗しました"}`);
+  return r.ok;
+}
+
+function forgetWindowBounds(id: string): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  cancelPendingRestore(id);
+  projectStore.setWindowBounds(id, null);
+  logger.info(`ウィンドウ位置の記憶を消去: ${project.name}`);
+  setStatus(`${project.name} のウィンドウ位置の記憶を消しました`);
+}
+
+/** 設定画面「全プロジェクトのウィンドウ位置を記憶」: ウィンドウが見つかったものだけ保存する */
+function saveAllWindowBounds(): OpResult {
+  let saved = 0;
+  const missing: string[] = [];
+  for (const p of projectStore.projects) {
+    if (saveWindowBounds(p.id, true)) saved += 1;
+    else missing.push(p.name);
+  }
+  const msg = `ウィンドウ位置を記憶: ${saved} 件${missing.length > 0 ? `（ウィンドウなし ${missing.length} 件: ${missing.join(", ")}）` : ""}`;
+  logger.info(msg);
+  setStatus(msg);
+  return { ok: saved > 0, error: saved > 0 ? undefined : "記憶できるウィンドウがありませんでした" };
+}
+
+/** 設定画面「全プロジェクトを記憶した位置へ戻す」: 記憶があり、今ウィンドウがあるものだけ適用する */
+function restoreAllWindowBounds(): OpResult {
+  let restored = 0;
+  let remembered = 0;
+  const failed: string[] = [];
+  for (const p of projectStore.projects) {
+    if (p.windowBounds === undefined) continue;
+    remembered += 1;
+    if (restoreWindowBounds(p.id, true)) restored += 1;
+    else failed.push(p.name);
+  }
+  const msg =
+    remembered === 0
+      ? "位置を記憶したプロジェクトがありません（タイル右クリック →「ウィンドウ位置を記憶」）"
+      : `ウィンドウ位置を復元: ${restored} / ${remembered} 件${failed.length > 0 ? `（未復元: ${failed.join(", ")}）` : ""}`;
+  logger.info(msg);
+  setStatus(msg);
+  return { ok: restored > 0, error: restored > 0 ? undefined : msg };
+}
+
+/**
+ * 「立ち上げる」直後の自動復元: 対象アプリのウィンドウが現れるまで 0.5 秒ごとに探し、
+ * 現れてから 1.5 秒待って（Cursor 自身の前回位置の復元処理が終わるのを待つ）記憶位置を適用する。
+ * 念のため 1.5 秒後にもう一度適用する（Cursor 側が上書きした場合の再適用）。
+ */
+function scheduleRestoreAfterLaunch(id: string): void {
+  cancelPendingRestore(id);
+  const startedAt = Date.now();
+  let seenAt: number | null = null;
+  let applied = 0;
+  const timer = setInterval(() => {
+    const project = projectStore.getProject(id);
+    if (project === null || project.windowBounds === undefined) {
+      cancelPendingRestore(id);
+      return;
+    }
+    const folder = path.basename(project.path);
+    const now = Date.now();
+    if (seenAt === null) {
+      if (readProjectWindowPlacement(project.clickTarget, folder).ok) {
+        seenAt = now;
+      } else if (now - startedAt > LAUNCH_RESTORE_TIMEOUT_MS) {
+        cancelPendingRestore(id);
+        logger.info(`ウィンドウ位置の自動復元を打ち切り（ウィンドウが現れず）: ${project.name}`);
+      }
+      return;
+    }
+    if (now - seenAt < LAUNCH_RESTORE_SETTLE_MS * (applied + 1)) return;
+    const r = applyProjectWindowPlacement(project.clickTarget, folder, project.windowBounds);
+    applied += 1;
+    logger.info(`ウィンドウ位置の自動復元（${applied} 回目）${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
+    if (!r.ok || applied >= 2) {
+      cancelPendingRestore(id);
+      if (r.ok) setStatus(`${project.name} のウィンドウを記憶した位置へ戻しました`);
+    }
+  }, LAUNCH_RESTORE_POLL_MS);
+  pendingRestores.set(id, timer);
 }
 
 /** 手動ステータスの割り当て（260727_1）: 右クリックメニューの確定処理。null = 解除 */
@@ -667,10 +909,26 @@ function wireIpc(): void {
 
   ipcMain.handle("unregister-project", (_e, id: string) => unregisterProjectById(id));
 
-  // タイル右クリックメニュー（260712_2）。ネイティブ Menu を popup し、確定処理は main 側で完結する
-  ipcMain.handle("show-tile-menu", (_e, id: string) => {
+  // タイル右クリックメニュー（260712_2）。ネイティブ Menu を popup し、確定処理は main 側で完結する。
+  // sessionId は分割タイル（260904_1 #3）からのときだけ届く → 「この枠を消す」を出す
+  ipcMain.handle("show-tile-menu", (_e, id: string, sessionId?: string) => {
     const project = projectStore.getProject(id);
     if (project === null || win === null) return;
+    const splitItems: MenuItemConstructorOptions[] =
+      typeof sessionId === "string" && sessionId !== ""
+        ? [{ label: "この枠を消す（このセッションの表示だけ消す）", click: () => { removeSessionDisplay(id, sessionId); } }]
+        : [];
+    // ウィンドウ位置の記憶／復元（260904_1 #3）
+    const remembered = project.windowBounds;
+    const boundsItems: MenuItemConstructorOptions[] = [
+      { label: "今のウィンドウ位置を記憶", click: () => { saveWindowBounds(id); } },
+      {
+        label: remembered !== undefined ? `記憶した位置へ戻す ${fmtWindowBounds(remembered)}` : "記憶した位置へ戻す（未記憶）",
+        enabled: remembered !== undefined,
+        click: () => { restoreWindowBounds(id); },
+      },
+      { label: "記憶を消す", enabled: remembered !== undefined, click: () => { forgetWindowBounds(id); } },
+    ];
     const launchLabel =
       project.clickTarget === "cursor"
         ? "立ち上げる（Cursor でこのフォルダを開く）"
@@ -700,9 +958,11 @@ function wireIpc(): void {
       ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
+      ...splitItems,
       { type: "separator" },
       { label: "ステータス", submenu: statusItems },
       { label: "表示名を変更…", click: () => { requestRename(id); } },
+      { label: "ウィンドウ位置", submenu: boundsItems },
       { type: "separator" },
       { label: "登録解除（hooks も除去）…", click: () => { void confirmAndUnregister(id); } },
     ]);
@@ -740,6 +1000,10 @@ function wireIpc(): void {
     }
     return { ok: true };
   });
+
+  // ウィンドウ位置の一括記憶／復元（260904_1 #3）: 設定画面のボタン
+  ipcMain.handle("save-all-window-bounds", (): OpResult => saveAllWindowBounds());
+  ipcMain.handle("restore-all-window-bounds", (): OpResult => restoreAllWindowBounds());
 
   // 未接続タイルの表示／非表示（260903_1）: ステータスバーのトグル。config.json に保持
   ipcMain.handle("set-show-unlinked", (_e, value: boolean) => {
@@ -921,6 +1185,7 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   if (livenessTimer !== null) clearInterval(livenessTimer);
   if (windowPollTimer !== null) clearInterval(windowPollTimer);
+  cancelAllPendingRestores();
   void devServers.stopAll(); // 開発サーバーを残さない（260722_1）
   void eventServer?.close();
   logger.info("terminal-app 終了");

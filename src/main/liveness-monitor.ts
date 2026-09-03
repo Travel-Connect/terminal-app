@@ -34,14 +34,72 @@ function envMs(name: string, fallback: number): number {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
-/** 掃引間隔（既定 30 秒）。index.ts の setInterval で使用 */
-export const DISCONNECT_CHECK_INTERVAL_MS = envMs("TERMINAL_APP_LIVENESS_INTERVAL_MS", 30_000);
+/**
+ * 掃引間隔（既定 15 秒。260904_1 #2 で 30 秒から短縮 — 終了検知・切断検知・確認待ちからの復帰を早める）。
+ * index.ts の setInterval で使用
+ */
+export const DISCONNECT_CHECK_INTERVAL_MS = envMs("TERMINAL_APP_LIVENESS_INTERVAL_MS", 15_000);
 /** transcript 無更新がこの時間を超え、かつウィンドウ消失で「切断」（応答生成中は transcript が更新され続ける前提。既定 3 分） */
 export const TRANSCRIPT_STALE_MS = envMs("TERMINAL_APP_TRANSCRIPT_STALE_MS", 180_000);
 /** transcript 無更新がこの時間を超えたら、ウィンドウが残っていても「切断」（長時間ツール実行の誤検知を避ける余裕。既定 15 分） */
 export const TRANSCRIPT_STALE_HARD_MS = envMs("TERMINAL_APP_TRANSCRIPT_STALE_HARD_MS", 15 * 60_000);
 /** 終了検知（260712_4）: transcript 無更新がこの時間以上のものだけ終端分類する（ターン境界・Stop 配送中との競合回避。既定 10 秒） */
 export const CONCLUDED_MIN_AGE_MS = envMs("TERMINAL_APP_CONCLUDED_MIN_AGE_MS", 10_000);
+/**
+ * 確認待ちからの復帰（260904_1 #2）: 確認待ちイベントからこの時間以上経った transcript 更新だけを
+ * 「許可後の作業再開」とみなす（通知直後に transcript が書き終わる競合を除外。既定 3 秒）
+ */
+export const CONFIRM_RESUME_MARGIN_MS = envMs("TERMINAL_APP_CONFIRM_RESUME_MARGIN_MS", 3_000);
+/** 確認待ちからの復帰: 確認待ちになってからこの時間未満は判定しない（登録簿 status の更新競合を避ける。既定 5 秒） */
+export const CONFIRM_RESUME_MIN_AGE_MS = envMs("TERMINAL_APP_CONFIRM_RESUME_MIN_AGE_MS", 5_000);
+
+export interface ConfirmTarget extends SweepTarget {
+  /** 確認待ちへ遷移したイベントの時刻（epoch ms） */
+  lastEventAt: number;
+}
+
+export interface ConfirmResumeDeps {
+  now(): number;
+  /** transcript ファイルの mtime（epoch ms）。取得不可は null */
+  mtimeMs(path: string): number | null;
+  /** Claude Code の登録簿 status（busy / waiting / idle）。無ければ undefined（session-registry.registryStatusOf を注入） */
+  registryStatus(sessionId: string): string | undefined;
+}
+
+export interface ConfirmResumeHit {
+  target: ConfirmTarget;
+  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / transcript が通知後に更新 */
+  reason: "registry" | "transcript";
+}
+
+/**
+ * 確認待ち → 実行中の復帰検知（260904_1 #2）。
+ *
+ * 背景: 権限確認（Notification）→ ユーザーが許可 → Claude が作業再開、の「許可」には hook が無く、
+ * 次の Stop / Notification が来るまでタイルが「確認待ち」のまま残っていた
+ * （実ログ 2026-09-03 20:27〜20:41 UTC: 商品登録アプリで permission → confirm が 4 回続き、間に running なし）。
+ * 根拠は 2 系統（どちらかで復帰）:
+ * - 登録簿 status が busy（Claude Code 自身の申告。cli 起動のみ載る）
+ * - transcript の mtime が確認待ちイベント時刻 ＋ 余裕（CONFIRM_RESUME_MARGIN_MS）以降
+ *   （許可後のツール実行結果が書き込まれる。アイドル通知（入力待ち）では transcript は動かない）
+ * 確認待ちになった直後（CONFIRM_RESUME_MIN_AGE_MS 未満）は判定しない。
+ */
+export function findResumedFromConfirm(targets: readonly ConfirmTarget[], deps: ConfirmResumeDeps): ConfirmResumeHit[] {
+  const out: ConfirmResumeHit[] = [];
+  const now = deps.now();
+  for (const t of targets) {
+    if (now - t.lastEventAt < CONFIRM_RESUME_MIN_AGE_MS) continue;
+    if (deps.registryStatus(t.sessionId) === "busy") {
+      out.push({ target: t, reason: "registry" });
+      continue;
+    }
+    if (t.transcriptPath === undefined) continue;
+    const mtime = deps.mtimeMs(t.transcriptPath);
+    if (mtime === null) continue;
+    if (mtime >= t.lastEventAt + CONFIRM_RESUME_MARGIN_MS) out.push({ target: t, reason: "transcript" });
+  }
+  return out;
+}
 
 export interface ConcludedSweepDeps {
   now(): number;

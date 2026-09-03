@@ -5,12 +5,13 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import type { AppConfig, ClickTarget, Project, ThemeSetting } from "../shared/types";
+import type { AppConfig, ClickTarget, Project, ThemeSetting, WindowBounds } from "../shared/types";
 import { DEFAULT_PORT } from "./constants";
 import { writeFileAtomic } from "./hooks-manager";
 import type { LoggerLike } from "./logger";
 import { nullLogger } from "./logger";
 import { normalizePath } from "./state-store";
+import { parseWindowBounds } from "./window-bounds";
 
 export interface AddProjectResult {
   ok: boolean;
@@ -103,6 +104,17 @@ export class ProjectStore {
     } catch (e) {
       this.logger.error(`projects.json の読み込みに失敗（空で継続・次回保存まで既存ファイルは温存）: ${String(e)}`);
       this._projects = [];
+    }
+    // 記憶したウィンドウ位置（260904_1 #3）: 壊れた値は捨てる（SetWindowPlacement に不正値を渡さない）
+    for (const p of this._projects) {
+      if (p.windowBounds === undefined) continue;
+      const parsed = parseWindowBounds(p.windowBounds);
+      if (parsed === null) {
+        this.logger.warn(`projects.json の windowBounds が不正なため無視: ${p.name}`);
+        delete p.windowBounds;
+      } else {
+        p.windowBounds = parsed;
+      }
     }
     try {
       if (fs.existsSync(this.configFile)) {
@@ -232,6 +244,21 @@ export class ProjectStore {
     p.name = trimmed === "" ? path.basename(p.path) : trimmed;
     this.saveProjects();
     return { ok: true, name: p.name };
+  }
+
+  /** ウィンドウ位置の記憶／消去（260904_1 #3）。null で記憶を消す。不正値は拒否 */
+  setWindowBounds(id: string, bounds: WindowBounds | null): boolean {
+    const p = this._projects.find((x) => x.id === id);
+    if (!p) return false;
+    if (bounds === null) {
+      delete p.windowBounds;
+    } else {
+      const parsed = parseWindowBounds(bounds);
+      if (parsed === null) return false;
+      p.windowBounds = parsed;
+    }
+    this.saveProjects();
+    return true;
   }
 
   private newId(): string {

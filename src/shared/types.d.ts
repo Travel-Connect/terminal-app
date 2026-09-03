@@ -28,6 +28,26 @@ export interface Project {
    * config.customStatuses の中から右クリックメニューで選択する。未設定 = ラベルなし
    */
   customStatus?: string;
+  /**
+   * 記憶したウィンドウ位置（260904_1 #3）。タイル右クリック「ウィンドウ位置を記憶」で
+   * 対象アプリ（Cursor / ターミナル）のウィンドウ配置を保存し、「立ち上げる」直後や
+   * 「記憶した位置へ戻す」で SetWindowPlacement により再現する。未設定 = 記憶なし
+   */
+  windowBounds?: WindowBounds;
+}
+
+/**
+ * ウィンドウ配置（260904_1 #3）。GetWindowPlacement の通常時矩形（rcNormalPosition）＋最大化フラグ。
+ * 座標は保存・復元とも同じ API を使うため、モニタ構成が同じ限り忠実に再現できる
+ */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+  /** 記憶した日時（ISO 8601）。設定画面の表示用 */
+  savedAt: string;
 }
 
 /** config.json（design.md 9 章） */
@@ -69,6 +89,11 @@ export interface SessionView {
    * 例「↓ 70.5k tokens · thinking xhigh」。取得不能・未転送時は undefined（非表示）。
    */
   statsText?: string;
+  /**
+   * このセッションを最初に観測した時刻（epoch ms。260904_1 #3）。
+   * 同じプロジェクトで複数セッションが並行するときの分割タイルの並び順（起動順）に使う
+   */
+  firstSeenAt?: number;
 }
 
 /** ステータスバー件数（REQ-10 / design.md 5.2） */
@@ -79,7 +104,7 @@ export interface StatusCounts {
   error: number;
   /** 切断セッション数（260712_2）。既存テスト・呼び出し側との互換のためオプショナル（未設定 = 0 扱い） */
   disconnected?: number;
-  /** 表示中セッション数（プロジェクトごとに 1 つ。待機タイルは数えない） */
+  /** 表示中セッション数（表示タイルごとに 1 つ。分割タイルはそれぞれ数える。待機タイルは数えない） */
   total: number;
 }
 
@@ -89,7 +114,13 @@ export interface Snapshot {
   projects: Project[];
   /** key = projectId。プロジェクトの表示セッション（直近イベント優先。design.md 5.2） */
   sessions: Record<string, SessionView>;
-  /** ステータスバー件数（REQ-10）。StateStore.counts を正とし renderer は表示整形のみ行う */
+  /**
+   * 分割タイル（260904_1 #3）。key = projectId、value = そのプロジェクトで生きているセッションが
+   * 2 本以上あるときの一覧（起動順）。キーが無いプロジェクトは従来どおり sessions の 1 タイル表示。
+   * 生死は Claude Code のセッション登録簿（~/.claude/sessions）と PID 存在で判定する
+   */
+  splitSessions: Record<string, SessionView[]>;
+  /** ステータスバー件数（REQ-10）。main が表示タイル基準で数え、renderer は表示整形のみ行う */
   counts: StatusCounts;
   config: AppConfig;
   pinned: boolean;
@@ -161,8 +192,15 @@ export interface TerminalAppApi {
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
   focusProject(id: string): Promise<FocusResult>;
-  /** タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除） */
-  showTileMenu(id: string): Promise<void>;
+  /**
+   * タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除）。
+   * sessionId は分割タイル（260904_1 #3）のときだけ渡す — 「この枠を消す」の対象になる
+   */
+  showTileMenu(id: string, sessionId?: string): Promise<void>;
+  /** 全プロジェクトのウィンドウ位置を一括で記憶（260904_1 #3）。結果はステータスバーにも出る */
+  saveAllWindowBounds(): Promise<OpResult>;
+  /** 記憶済みの全プロジェクトのウィンドウを記憶位置へ戻す（260904_1 #3） */
+  restoreAllWindowBounds(): Promise<OpResult>;
   /** restart はアプリ自体を再起動する（main 側で確認ダイアログを挟む）。 */
   windowAction(action: WindowAction): void;
   /** NFR-01 計測用: スナップショット描画完了を main へ通知（受信→描画のログ差分計測） */

@@ -23,7 +23,26 @@ let localMessageTimer: number | undefined;
 /** 折りたたみの閾値（面 1d「他10件を表示」相当。先頭 N 件のみ表示し残りを畳む） */
 const PROJECT_FOLD_LIMIT = 5;
 
+/**
+ * タイル要素（key = タイルキー）。通常は projectId、分割タイル（260904_1 #3）は `${projectId}|${sessionId}`。
+ * tileSessions は 1 秒毎の時刻更新用に、各タイルが今表示しているセッションを保持する
+ */
 const tileEls = new Map<string, HTMLButtonElement>();
+const tileSessions = new Map<string, SessionView | undefined>();
+
+/** 1 タイル分の描画指示（renderGrid が Snapshot から組み立てる） */
+interface TileSpec {
+  key: string;
+  project: Project;
+  session: SessionView | undefined;
+  /** 分割タイルの通し番号（1 始まり）。通常タイルは undefined */
+  seq?: number;
+}
+
+/** 分割タイルの番号表示（①〜⑳。それ以上は数字） */
+function seqLabel(n: number): string {
+  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `#${n}`;
+}
 
 function $(sel: string): HTMLElement {
   const el = document.querySelector(sel);
@@ -90,23 +109,31 @@ window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", ()
 
 /* ---------------- タイルグリッド（面 1a / 1b） ---------------- */
 
-function createTile(project: Project): HTMLButtonElement {
+function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const el = document.createElement("button");
   el.className = "tile state-waiting";
   el.setAttribute("role", "listitem");
   el.dataset.id = project.id;
+  if (sessionId !== undefined) el.dataset.sessionId = sessionId;
 
   const glow = document.createElement("span");
   glow.className = "tile-glow";
-  // 見出し行 = プロジェクト名 + 手動ステータスバッジ（260727_1。未割り当て時は hidden）
+  // 見出し = 1 行目: プロジェクト名（＋分割タイルの番号）／2 行目: 手動ステータスバッジ
+  // （260727_1 のバッジは 260904_1 #1 で名前の下の行へ移動 — 名前と同じ行を取り合わない。未割り当て時は hidden）
   const head = document.createElement("span");
   head.className = "tile-head";
+  const nameRow = document.createElement("span");
+  nameRow.className = "tile-name-row";
   const name = document.createElement("span");
   name.className = "tile-name";
+  const seq = document.createElement("span");
+  seq.className = "tile-seq";
+  seq.hidden = true;
+  nameRow.append(name, seq);
   const badge = document.createElement("span");
   badge.className = "tile-badge";
   badge.hidden = true;
-  head.append(name, badge);
+  head.append(nameRow, badge);
   const center = document.createElement("span");
   center.className = "tile-center";
   const spinner = document.createElement("span");
@@ -123,16 +150,37 @@ function createTile(project: Project): HTMLButtonElement {
   el.append(glow, head, center, status);
 
   el.addEventListener("click", () => {
-    // クリックで前面化（REQ-05）。失敗メッセージは main からステータスバーへ届く
+    // クリックで前面化（REQ-05）。分割タイルもプロジェクトのウィンドウを前面化する（Cursor 内の
+    // 特定ターミナルまでは外から選べない）。失敗メッセージは main からステータスバーへ届く
     void api.focusProject(project.id);
   });
   el.addEventListener("contextmenu", (e) => {
     // 右クリック = プロジェクト操作メニュー（260712_2: 再接続・表示クリア・登録解除）。
-    // メニュー本体は main 側のネイティブ Menu（クリック確定処理も main が持つ）
+    // メニュー本体は main 側のネイティブ Menu（クリック確定処理も main が持つ）。
+    // 分割タイルは sessionId を渡し「この枠を消す」を出してもらう（260904_1 #3）
     e.preventDefault();
-    void api.showTileMenu(project.id);
+    void api.showTileMenu(project.id, sessionId);
   });
   return el;
+}
+
+/**
+ * Snapshot → タイル一覧（260904_1 #3）。プロジェクト順に、分割対象（splitSessions にキーあり）は
+ * セッションごとに 1 タイル（起動順・番号付き）、それ以外は従来の 1 タイル
+ */
+function buildTileSpecs(s: Snapshot): TileSpec[] {
+  const specs: TileSpec[] = [];
+  for (const project of s.projects) {
+    const members = s.splitSessions[project.id];
+    if (members !== undefined && members.length >= 2) {
+      members.forEach((session, i) => {
+        specs.push({ key: `${project.id}|${session.sessionId}`, project, session, seq: i + 1 });
+      });
+    } else {
+      specs.push({ key: project.id, project, session: s.sessions[project.id] });
+    }
+  }
+  return specs;
 }
 
 function renderGrid(): void {
@@ -145,23 +193,27 @@ function renderGrid(): void {
   empty.hidden = projects.length > 0;
   grid.style.display = projects.length > 0 ? "" : "none";
 
+  const specs = buildTileSpecs(snap);
   const seen = new Set<string>();
   let visibleCount = 0;
-  for (const project of projects) {
-    seen.add(project.id);
-    let el = tileEls.get(project.id);
+  specs.forEach((spec, index) => {
+    const { project, session } = spec;
+    seen.add(spec.key);
+    let el = tileEls.get(spec.key);
     if (el === undefined) {
-      el = createTile(project);
-      tileEls.set(project.id, el);
-      grid.appendChild(el);
+      el = createTile(project, spec.seq !== undefined ? session?.sessionId : undefined);
+      tileEls.set(spec.key, el);
     }
-    const session = snap.sessions[project.id];
+    // DOM 順をタイル一覧の順に揃える（分割で増えたタイルを同じプロジェクトの隣に置く）。
+    // 既に正しい位置にある要素は動かさない（再挿入は CSS アニメーションを最初から再生させてしまう）
+    if (grid.children[index] !== el) grid.insertBefore(el, grid.children[index] ?? null);
+    tileSessions.set(spec.key, session);
     const state = session === undefined ? "waiting" : session.state;
     // 未接続（260903_1）: 対象アプリのウィンドウ無し＋実行中／確認待ちでない → 灰色。非表示設定なら隠す
-    const unlinked = isUnlinked(snap.windowPresence[project.id], state);
-    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}`;
+    const unlinked = isUnlinked(snap!.windowPresence[project.id], state);
+    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
     if (el.className !== cls) el.className = cls; // 同一値の再代入を避けて発光アニメを継続させる
-    const hidden = unlinked && !snap.config.showUnlinked;
+    const hidden = unlinked && !snap!.config.showUnlinked;
     if (el.hidden !== hidden) el.hidden = hidden;
     if (!hidden) visibleCount += 1;
     const hint = unlinked ? UNLINKED_HINT[project.clickTarget] : "";
@@ -169,6 +221,11 @@ function renderGrid(): void {
     const nameEl = el.querySelector(".tile-name") as HTMLElement;
     const iconEl = el.querySelector(".tile-icon") as HTMLElement;
     if (nameEl.textContent !== project.name) nameEl.textContent = project.name;
+    // 分割タイルの番号（260904_1 #3）。通常タイルは非表示
+    const seqEl = el.querySelector(".tile-seq") as HTMLElement;
+    const seqText = spec.seq !== undefined ? seqLabel(spec.seq) : "";
+    if (seqEl.textContent !== seqText) seqEl.textContent = seqText;
+    seqEl.hidden = seqText === "";
     // 手動ステータスバッジ（260727_1）。未割り当ては非表示でレイアウトを崩さない
     const badgeEl = el.querySelector(".tile-badge") as HTMLElement;
     const badge = project.customStatus ?? "";
@@ -182,12 +239,13 @@ function renderGrid(): void {
     if (workEl.textContent !== work) workEl.textContent = work;
     workEl.hidden = work === "";
     updateTileStatus(el, session);
-  }
-  // 登録解除されたタイルを取り除く
-  for (const [id, el] of tileEls) {
-    if (!seen.has(id)) {
+  });
+  // 登録解除・分割解除で不要になったタイルを取り除く
+  for (const [key, el] of tileEls) {
+    if (!seen.has(key)) {
       el.remove();
-      tileEls.delete(id);
+      tileEls.delete(key);
+      tileSessions.delete(key);
     }
   }
   // 未接続タイルをすべて隠して表示が空になったときの案内（260903_1）。未登録の空状態とは別
@@ -366,6 +424,14 @@ function createProjectRow(project: Project): HTMLElement {
   p.className = "project-path";
   p.textContent = project.path;
   info.append(name, p);
+  // 記憶したウィンドウ位置（260904_1 #3）。タイル右クリック →「ウィンドウ位置」で記憶・復元・消去
+  if (project.windowBounds !== undefined) {
+    const b = project.windowBounds;
+    const bounds = document.createElement("div");
+    bounds.className = "project-bounds";
+    bounds.textContent = `ウィンドウ位置を記憶済み (${b.x}, ${b.y}) ${b.width}×${b.height}${b.maximized ? "・最大化" : ""}`;
+    info.append(bounds);
+  }
 
   const actions = document.createElement("div");
   actions.className = "project-actions";
@@ -434,8 +500,8 @@ function render(): void {
 /** 1 秒毎に時刻表示のみ更新（経過時間・相対時刻。DOM 再構築はしない = NFR-07 に配慮） */
 window.setInterval(() => {
   if (snap === null) return;
-  for (const [id, el] of tileEls) {
-    updateTileStatus(el, snap.sessions[id]);
+  for (const [key, el] of tileEls) {
+    updateTileStatus(el, tileSessions.get(key));
   }
 }, 1000);
 
@@ -566,6 +632,14 @@ function wireControls(): void {
   // 未接続タイルの表示／非表示（260903_1）
   ($("#unlinked-check") as HTMLInputElement).addEventListener("change", (e) => {
     void api.setShowUnlinked((e.target as HTMLInputElement).checked);
+  });
+
+  // ウィンドウ位置の一括記憶／復元（260904_1 #3）。結果はステータスバー（main の setStatus）に出る
+  $("#btn-save-all-bounds").addEventListener("click", () => {
+    void api.saveAllWindowBounds();
+  });
+  $("#btn-restore-all-bounds").addEventListener("click", () => {
+    void api.restoreAllWindowBounds();
   });
 
   // 表示名の変更ダイアログ（260903_2）: Enter／保存で確定、Esc／キャンセル／背景クリックで閉じる

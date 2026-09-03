@@ -1,0 +1,16 @@
+2026-09-03T21:20:07.840Z [INFO] terminal-app 起動 (dataDir=C:\Users\hppym\AppData\Local\Temp\ta-liveness-e2e-OezVD0, demo=false)
+2026-09-03T21:20:07.847Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-liveness-proj-M8lKuM
+2026-09-03T21:20:07.849Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-liveness-proj-M8lKuM
+2026-09-03T21:20:07.883Z [INFO] event-server: listening on http://127.0.0.1:42197/terminal-app/event
+2026-09-03T21:20:07.895Z [INFO] ウィンドウ判定（初回）: 接続 0 / 未接続 1 [liveness-proj]
+2026-09-03T21:20:08.106Z [INFO] window shown (demo=false, capture=-)
+2026-09-03T21:20:09.444Z [INFO] event 受信: UserPromptSubmit → running (project=p-live, session=e265d7a7-9cf0-4b39-bb57-6a0222dfc5b7)
+2026-09-03T21:20:09.446Z [INFO] ui-latency: 受信→描画完了 2ms (revision=2)
+2026-09-03T21:20:09.447Z [INFO] event 受信: UserPromptSubmit → running (project=p-live, session=00000000-dead-4000-8000-000000000001)
+2026-09-03T21:20:09.461Z [INFO] ui-latency: 受信→描画完了 14ms (revision=3)
+2026-09-03T21:20:11.908Z [INFO] セッション終了を確認（登録簿にプロセスなし）: session=00000000-dead-4000-8000-000000000001
+2026-09-03T21:20:11.908Z [INFO] 実行中のまま終了 → 切断表示: session=00000000-dead-4000-8000-000000000001
+2026-09-03T21:20:11.909Z [INFO] 終了済みセッションの記録を破棄（同じプロジェクトに生存あり）: 00000000-dead-4000-8000-000000000001
+2026-09-03T21:20:16.791Z [INFO] event 受信: Notification 種別=permission → confirm (project=p-live, session=e265d7a7-9cf0-4b39-bb57-6a0222dfc5b7)
+2026-09-03T21:20:16.800Z [INFO] ui-latency: 受信→描画完了 9ms (revision=5)
+2026-09-03T21:20:21.957Z [INFO] 確認待ちから復帰: liveness-proj (session=e265d7a7-9cf0-4b39-bb57-6a0222dfc5b7) — 許可後に transcript が更新

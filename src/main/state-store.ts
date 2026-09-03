@@ -153,17 +153,67 @@ interface SessionRec {
   transcriptPath?: string;
   /** statusLine 転送由来の作業メトリクス表示（例「↓ 70.5k tokens · thinking xhigh」。260712_3 案A） */
   statsText?: string;
+  /** 最初に観測した時刻（260904_1 #3: 分割タイルの並び順 = 起動順） */
+  firstSeenAt: number;
+  /**
+   * 終了済み（260904_1 #3）: Claude Code の登録簿で「プロセスが居ない」と確認された、または正常 SessionEnd を受けた。
+   * 表示状態（完了・確認待ち等）は残すが、分割タイルの対象から外れ、表示選定では生存セッションに劣後する
+   */
+  dead?: boolean;
 }
 
 /**
- * 表示セッションの優先判定（260712 課題A）: candidate を current より優先するか。
- * 「実行中」＞ 非実行中。同順位なら最終イベント時刻が新しい（同時刻含む）方を採る。
+ * 表示セッションの優先判定（260712 課題A、260904_1 #3 で生存優先を追加）: candidate を current より優先するか。
+ * 生存 ＞ 終了済み ＞（同順位内）「実行中」＞ 非実行中 ＞（同順位内）最終イベント時刻が新しい（同時刻含む）方。
  */
-function preferForDisplay(candidate: SessionRec, current: SessionView): boolean {
+function preferForDisplay(candidate: SessionRec, current: SessionRec): boolean {
+  const candidateDead = candidate.dead === true;
+  const currentDead = current.dead === true;
+  if (candidateDead !== currentDead) return !candidateDead;
   const candidateRunning = candidate.state === "running";
   const currentRunning = current.state === "running";
   if (candidateRunning !== currentRunning) return candidateRunning;
   return candidate.lastEventAt >= current.lastEventAt;
+}
+
+/** 分割タイル（260904_1 #3）の対象になる状態。切断は「もう居ない」の表示なので対象外 */
+const SPLIT_STATES: ReadonlySet<SessionState> = new Set(["running", "done", "confirm", "error"]);
+
+/**
+ * ステータスバー件数（design.md 5.2 / 260904_1 #3 で表示タイル基準に一般化）。
+ * views = 画面に出るタイルのセッション一覧（分割タイルはそれぞれ 1 件）。待機タイルは含まれない。
+ */
+export function countTiles(views: readonly SessionView[]): StatusCounts {
+  const c: StatusCounts = { running: 0, done: 0, confirm: 0, error: 0, total: 0 };
+  let disconnected = 0;
+  for (const v of views) {
+    c.total += 1;
+    if (v.state === "waiting") continue; // 表示セッションはイベント由来のため waiting は来ない
+    if (v.state === "disconnected") {
+      disconnected += 1;
+      continue;
+    }
+    c[v.state] += 1;
+  }
+  // disconnected キーは 1 件以上のときだけ付ける（0 件時の形を従来と同一に保ち、既存の期待値と互換にする）
+  if (disconnected > 0) c.disconnected = disconnected;
+  return c;
+}
+
+/** 内部記録 → 配信用ビュー（dead は内部専用。firstSeenAt は分割タイルの並び順用に載せる） */
+function toView(rec: SessionRec): SessionView {
+  const view: SessionView = {
+    sessionId: rec.sessionId,
+    projectId: rec.projectId,
+    state: rec.state,
+    lastEventAt: rec.lastEventAt,
+    firstSeenAt: rec.firstSeenAt,
+  };
+  if (rec.runningSince !== undefined) view.runningSince = rec.runningSince;
+  if (rec.lastMessage !== undefined) view.lastMessage = rec.lastMessage;
+  if (rec.workText !== undefined) view.workText = rec.workText;
+  if (rec.statsText !== undefined) view.statsText = rec.statsText;
+  return view;
 }
 
 export interface ApplyResult {
@@ -208,6 +258,11 @@ export class StateStore extends EventEmitter {
         this.emit("changed");
         return { projectId: existing.projectId, sessionId: evt.session_id, state: existing.state, discardedRunning: true };
       }
+      if (existing !== undefined && existing.dead !== true) {
+        // 完了・確認待ち等のまま正常終了: 表示は残すが終了済みにする（260904_1 #3: 分割タイルの対象外へ）
+        existing.dead = true;
+        this.emit("changed");
+      }
       return null;
     }
 
@@ -218,7 +273,10 @@ export class StateStore extends EventEmitter {
       projectId: project.id,
       state: "waiting",
       lastEventAt: t,
+      firstSeenAt: t,
     };
+    // イベントが届く = プロセスは生きている（登録簿の一時的な誤判定を上書き。260904_1 #3）
+    delete rec.dead;
 
     if (mapped === "running") {
       // 実行中への遷移: 経過時間の起点を記録（既に実行中なら継続 = 起点維持。design.md 5.1）
@@ -260,38 +318,119 @@ export class StateStore extends EventEmitter {
    * イベント未受信のプロジェクトは含まれない（= UI 側で「待機」タイル表示）。
    */
   displaySessions(projects: readonly Project[]): Record<string, SessionView> {
-    const result: Record<string, SessionView> = {};
+    const best = new Map<string, SessionRec>();
     for (const rec of this.sessions.values()) {
-      const cur = result[rec.projectId];
-      if (cur === undefined || preferForDisplay(rec, cur)) {
-        result[rec.projectId] = { ...rec };
-      }
+      const cur = best.get(rec.projectId);
+      if (cur === undefined || preferForDisplay(rec, cur)) best.set(rec.projectId, rec);
     }
     // 登録解除済みプロジェクトのセッションは表示対象から外す
     const ids = new Set(projects.map((p) => p.id));
-    for (const pid of Object.keys(result)) {
-      if (!ids.has(pid)) delete result[pid];
+    const result: Record<string, SessionView> = {};
+    for (const [pid, rec] of best) {
+      if (ids.has(pid)) result[pid] = toView(rec);
     }
     return result;
   }
 
-  /** ステータスバー件数（design.md 5.2: 表示中セッションを数える。待機タイルは数えない） */
-  counts(projects: readonly Project[]): StatusCounts {
-    const c: StatusCounts = { running: 0, done: 0, confirm: 0, error: 0, total: 0 };
-    let disconnected = 0;
-    const views = this.displaySessions(projects);
-    for (const v of Object.values(views)) {
-      c.total += 1;
-      if (v.state === "waiting") continue; // 表示セッションはイベント由来のため waiting は来ない
-      if (v.state === "disconnected") {
-        disconnected += 1;
-        continue;
-      }
-      c[v.state] += 1;
+  /**
+   * 分割タイル（260904_1 #3）: プロジェクトごとに「生きているセッション」が 2 本以上あるときだけ、
+   * その一覧（起動順 = firstSeenAt 昇順、同時刻は sessionId 順）を返す。1 本以下のプロジェクトはキー無し
+   * （= 従来の 1 タイル表示）。終了済み（dead）・切断は対象外。
+   */
+  splitSessions(projects: readonly Project[]): Record<string, SessionView[]> {
+    const groups = new Map<string, SessionRec[]>();
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true || !SPLIT_STATES.has(rec.state)) continue;
+      const list = groups.get(rec.projectId) ?? [];
+      list.push(rec);
+      groups.set(rec.projectId, list);
     }
-    // disconnected キーは 1 件以上のときだけ付ける（0 件時の形を従来と同一に保ち、既存の期待値と互換にする）
-    if (disconnected > 0) c.disconnected = disconnected;
-    return c;
+    const ids = new Set(projects.map((p) => p.id));
+    const result: Record<string, SessionView[]> = {};
+    for (const [pid, list] of groups) {
+      if (!ids.has(pid) || list.length < 2) continue;
+      list.sort((a, b) => a.firstSeenAt - b.firstSeenAt || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+      result[pid] = list.map(toView);
+    }
+    return result;
+  }
+
+  /** ステータスバー件数（design.md 5.2: プロジェクトごとの表示セッションを数える。待機タイルは数えない） */
+  counts(projects: readonly Project[]): StatusCounts {
+    return countTiles(Object.values(this.displaySessions(projects)));
+  }
+
+  /**
+   * 登録簿による生死の反映（260904_1 #3）。戻り値: 値が実際に変わったか。
+   * dead=true は表示状態を変えない（完了・確認待ちの表示は残る）が、分割タイルの対象から外れ、
+   * 表示選定で生存セッションに劣後する。
+   */
+  setDead(sessionId: string, dead: boolean): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || (rec.dead === true) === dead) return false;
+    if (dead) rec.dead = true;
+    else delete rec.dead;
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * 終了済み（dead）セッションのうち、同じプロジェクトに生存セッションがあるものを破棄する（260904_1 #3）。
+   * 生存セッションが無いプロジェクトの終了済み記録は残す（従来どおり「完了・N分前」の表示を保つ）。
+   * 戻り値: 破棄した sessionId
+   */
+  pruneDeadSessions(): string[] {
+    const aliveProjects = new Set<string>();
+    for (const rec of this.sessions.values()) {
+      if (rec.dead !== true) aliveProjects.add(rec.projectId);
+    }
+    const removed: string[] = [];
+    for (const [sid, rec] of this.sessions) {
+      if (rec.dead === true && aliveProjects.has(rec.projectId)) {
+        this.sessions.delete(sid);
+        removed.push(sid);
+      }
+    }
+    if (removed.length > 0) this.emit("changed");
+    return removed;
+  }
+
+  /** 1 セッションの表示を消す（分割タイルの「この枠を消す」。260904_1 #3） */
+  removeSession(sessionId: string): boolean {
+    if (!this.sessions.delete(sessionId)) return false;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 保持している全セッション ID（登録簿との突合用。260904_1 #3） */
+  sessionIds(): string[] {
+    return [...this.sessions.keys()];
+  }
+
+  /** 確認待ちからの復帰検知の対象 = 「確認待ち」かつ終了済みでないセッション（260904_1 #2） */
+  confirmSessions(): Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number }> {
+    const out: Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.state === "confirm" && rec.dead !== true) {
+        out.push({ sessionId: rec.sessionId, projectId: rec.projectId, transcriptPath: rec.transcriptPath, lastEventAt: rec.lastEventAt });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 確認待ち → 実行中（260904_1 #2）: 許可後に作業が再開された（transcript 更新／登録簿 busy）ときの遷移。
+   * 確認待ち以外には適用しない。経過時間の起点は検知時刻。
+   */
+  resumeFromConfirm(sessionId: string): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "confirm") return false;
+    const t = this.now();
+    rec.state = "running";
+    rec.runningSince = t;
+    rec.lastEventAt = t;
+    this.emit("changed");
+    return true;
   }
 
   /**
@@ -354,6 +493,7 @@ export class StateStore extends EventEmitter {
       runningSince: concluded ? undefined : info.lastEventAt,
       transcriptPath: info.transcriptPath,
       workText: info.workText ?? existing?.workText,
+      firstSeenAt: existing?.firstSeenAt ?? info.lastEventAt,
     });
     this.emit("changed");
     return true;
@@ -419,7 +559,7 @@ export class StateStore extends EventEmitter {
 
   /** デモ用シード（--demo 実行時のみ使用。hooks 追記・永続化は一切行わない） */
   seedSession(rec: SessionView): void {
-    this.sessions.set(rec.sessionId, { ...rec });
+    this.sessions.set(rec.sessionId, { ...rec, firstSeenAt: rec.firstSeenAt ?? rec.runningSince ?? rec.lastEventAt });
     this.emit("changed");
   }
 

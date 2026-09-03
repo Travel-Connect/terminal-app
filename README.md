@@ -40,6 +40,20 @@ npm start
   右クリック →「立ち上げる」で対象アプリを開くと数秒で通常表示に戻る。
 - **表示名**: タイル右クリック →「表示名を変更…」または設定画面の ✎ で、フォルダ名とは別の表示名を付けられる
   （空にするとフォルダ名へ戻る。前面化・切断検知の対象探索はフォルダ名のまま）。
+  手動ステータスのバッジ（作業中／レビュー待ち等）は表示名の下の行に出る（260904_1 #1）。
+- **確認待ちの見え方と復帰（260904_1 #2）**: 確認待ちのタイルは青で 1 秒周期に点滅する。完了・切断・確認待ち復帰の
+  見直し（掃引）は 15 秒ごと。権限確認を許可して Claude が作業を再開した（transcript が更新された／Claude Code の
+  登録簿 status が busy になった）ことを掃引で検知し、タイルは自動で「実行中」に戻る。
+- **分割タイル（260904_1 #3）**: 1 つのフォルダで 2 本以上の claude が同時に動いている（Cursor の複数ターミナル等）と、
+  タイルが「名前 ①」「名前 ②」（起動順）に自動で分かれ、それぞれの状態・作業テキストが見える。1 本に戻れば元の 1 タイルへ。
+  生死は Claude Code 自身が書く登録簿（`%USERPROFILE%\.claude\sessions\<pid>.json`）とプロセス存在で判定するため、
+  ターミナルを閉じれば約 30 秒以内（掃引 2 回）に枠が消える。分割タイルの右クリック →「この枠を消す」で手動でも消せる。
+  ステータスバーの件数は表示タイル基準。
+- **ウィンドウ位置の記憶／復元（260904_1 #3）**: タイル右クリック →「ウィンドウ位置」→「今のウィンドウ位置を記憶」で
+  Cursor / ターミナルのウィンドウ配置（位置・サイズ・最大化）を `projects.json` に保存し、「記憶した位置へ戻す」で再現する。
+  設定画面の「ウィンドウ位置」に全プロジェクト一括の記憶／復元ボタンがある（アップデート等で全部閉じたあとの復帰用）。
+  右クリック →「立ち上げる」で開いた直後は、ウィンドウが現れ次第（最大 60 秒待ち）記憶した位置へ自動で動かす。
+  記憶した位置がどのモニタにも掛からないときは復元しない。
 - 登録解除は設定画面（歯車アイコン）の各プロジェクト行の × ボタン。自アプリ分の hooks のみ除去する。
 - トースト通知・サウンドは次期スコープ（REQ-12）。設定 UI は無効表示のみで音は鳴らない。
 
@@ -56,11 +70,13 @@ npm start
 | `node scripts/verify-real-session.mjs <出力先>` | 実 `claude -p` セッション＋マージ済み実 hook コマンドで、hooks 整備→実行中→完了→再起動保持→未起動時の無害性を通しで実測し証跡を残す（専用ポートで実稼働アプリと共存） |
 | `node scripts/verify-foreground.mjs <出力先>` | 実ターミナルウィンドウを開き、前面化（V-09 #8）と最小化からの復元＋前面化（#9）を GetForegroundWindow / IsIconic で実測する（実行中は一瞬フォーカスが移る） |
 | `node scripts/verify-unlinked-rename-e2e.mjs [出力先]` | デモ起動を CDP（remote-debugging）で操作し、未接続タイルの灰色表示・トグル非表示・config 保持と、表示名の変更ダイアログ（保存／上限拒否／空でフォルダ名復帰）を実 IPC 往復で確認し、スクリーンショットを残す |
+| `node scripts/verify-split-blink-e2e.mjs [出力先]` | デモ（16 タイル）を CDP で開き、バッジが名前の下の行にあること・確認待ちが青の点滅（computed style）・同じプロジェクトの 2 セッションが ①② の分割タイルになること・件数が表示タイル基準・設定画面のウィンドウ位置ボタンを確認し、スクリーンショットを残す（260904_1） |
+| `node scripts/verify-liveness-registry-e2e.mjs [出力先]` | 非デモの専用インスタンスに実 hook 形式のイベントを注入し、実登録簿（`~/.claude/sessions`）に無い架空セッションが掃引 2 回で終了確定 → 切断 → 破棄され分割が解けること、確認待ち → transcript 更新で「実行中」へ復帰することを実測する（登録簿に生きている claude が必要。260904_1） |
 
 検証・証跡用の起動フラグ（`npx electron . <flags>`）:
 
 - `--demo` — モック面 1b 相当の 12 タイルをシードして起動（一時データディレクトリ使用。実設定・実 hooks に触れない）
-- `--demo-count=16` — 16 タイル（NFR-05 の確認用）
+- `--demo-count=16` — 16 タイル（NFR-05 の確認用。棚割り-app が 2 セッションの分割タイル例を含む）
 - `--view=settings` — 設定画面を初期表示
 - `--theme=light|dark|auto` — テーマの一時上書き
 - `--capture=<path> [--capture-delay=<ms>]` — スクリーンショット PNG を保存して自動終了
@@ -74,7 +90,10 @@ src/
     state-store.ts     … ② 状態ストア（スキーマ検証・4 状態遷移・cwd 最長一致・直近セッション優先）
     project-store.ts   … ② の永続化（%APPDATA%\terminal-app\projects.json / config.json）
     hooks-manager.ts   … ④ hooks 設定マネージャ（settings.json の安全マージ/除去・バックアップ・アトミック書き込み）
-    window-control.ts  … ⑤ ウィンドウ制御（koffi/user32: EnumWindows・SetForegroundWindow・復元）
+    window-control.ts  … ⑤ ウィンドウ制御（koffi/user32: EnumWindows・SetForegroundWindow・復元・Get/SetWindowPlacement）
+    session-registry.ts … Claude Code のセッション登録簿（~/.claude/sessions）による生死判定（260904_1）
+    liveness-monitor.ts … 15 秒周期の掃引ロジック（終了検知・切断検知・確認待ちからの復帰）
+    window-bounds.ts   … 記憶したウィンドウ位置（projects.json）の検証・整形
     index.ts           … 結線・BrowserWindow・IPC・多重起動禁止・受信→描画レイテンシログ
     demo.ts / logger.ts / paths.ts / constants.ts
   preload/index.ts     … contextBridge（window.terminalApp）
@@ -89,6 +108,7 @@ scripts/               … build 補助・スモーク・注入検証
 - ログ: `%APPDATA%\terminal-app\logs\app.log`（日次ローテーション・7 日保持）
 - 環境変数 `TERMINAL_APP_DATA_DIR` でデータディレクトリを差し替え可能（テスト・デモ用）
 - 環境変数 `TERMINAL_APP_WINDOW_POLL_MS` で未接続タイル判定（ウィンドウ列挙）の間隔を変更可能（既定 5000ms。検証用）
+- 環境変数 `TERMINAL_APP_LIVENESS_INTERVAL_MS` で掃引（終了・切断・確認待ち復帰・登録簿の生死判定）の間隔を変更可能（既定 15000ms。検証用）
 
 ## 既知の制約（MVP）
 
