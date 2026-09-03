@@ -15,6 +15,9 @@
         <span class="tb-title">terminal-app</span>
       </div>
       <div class="tb-actions">
+        <button id="btn-add-project" class="tb-btn" title="フォルダを選んでプロジェクト登録" aria-label="フォルダを選んでプロジェクト登録">
+          <svg viewBox="0 0 16 16" width="13" height="13"><path fill-rule="evenodd" d="M1.5 3h4.2l1.5 1.5h7.3a.8.8 0 0 1 .8.8V13a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1V3zm6 4h1v2h2v1h-2v2h-1v-2h-2v-1h2z" fill="currentColor"/></svg>
+        </button>
         <button id="btn-pin" class="tb-btn" title="常に手前（ピン留め）" aria-label="常に手前">
           <svg viewBox="0 0 16 16" width="13" height="13"><path d="M9.5 1.5 14.5 6.5 13 8l-.7-.2-2.6 2.6.3 2.6-1.5 1.5-3-3L2 15l-1-1 3.5-3.5-3-3L3 6l2.6.3L8.2 3.7 8 3z" fill="currentColor"/></svg>
         </button>
@@ -37,11 +40,14 @@
     <!-- メイン: タイルグリッド（面 1a / 1b）・空状態（面 1c） -->
     <main id="view-main">
       <div id="tile-grid" role="list"></div>
+      <!-- 未接続タイルをすべて隠していて表示が空のとき（260903_1）。空状態（未登録）と区別する -->
+      <div id="all-hidden-note" hidden>未接続のタイルを非表示にしています。ステータスバーの「未接続を表示」で表示できます。</div>
       <div id="empty-state" hidden>
         <div class="empty-drop">
           <div class="empty-icon">&#x1F4C1;</div>
           <div class="empty-title">フォルダをここにドラッグ&amp;ドロップ</div>
-          <div class="empty-sub">プロジェクトを登録すると、セッションの状態がタイルで表示されます</div>
+          <div class="empty-sub">プロジェクトを登録すると、セッションの状態がタイルで表示されます<br />（エクスプローラからのドロップに対応。Cursor のツリーからのドラッグはパス情報が渡らないため登録できません）</div>
+          <button id="btn-pick-empty" class="btn-pick">フォルダを選んで登録</button>
         </div>
       </div>
     </main>
@@ -88,6 +94,14 @@
           </div>
         </div>
 
+        <h3>ステータス</h3>
+        <p class="settings-note">タイル右クリック →「ステータス」で割り当てる手動ラベル。自由に追加・削除できます。</p>
+        <div id="status-list"></div>
+        <div class="status-add">
+          <input id="status-input" type="text" placeholder="新しいステータス名" maxlength="20" />
+          <button id="btn-add-status">追加</button>
+        </div>
+
         <h3>プロジェクト</h3>
         <p class="settings-note">クリックで開くアプリをプロジェクトごとに選択。行末のボタンで登録解除。</p>
         <div id="project-list"></div>
@@ -99,11 +113,34 @@
     <footer id="statusbar">
       <span id="status-counts">0 セッション</span>
       <span id="status-message"></span>
+      <!-- 未接続タイルの表示／非表示トグル（260903_1）。件数付きラベル＋小型スイッチ。プロジェクト未登録時は非表示 -->
+      <label id="unlinked-toggle" class="sb-toggle" hidden title="対象アプリ（Cursor / ターミナル）でフォルダを開いているウィンドウが見つからないタイルを表示するか">
+        <span id="unlinked-label">未接続を表示（0）</span>
+        <span class="toggle small">
+          <input type="checkbox" id="unlinked-check" />
+          <span class="knob"></span>
+        </span>
+      </label>
     </footer>
 
     <!-- D&D オーバーレイ -->
     <div id="drop-overlay" hidden>
-      <div class="drop-inner">フォルダをドロップして登録</div>
+      <div class="drop-inner">フォルダ／プロジェクト内のファイルをドロップして登録</div>
+    </div>
+
+    <!-- 表示名の変更ダイアログ（260903_2）。タイル右クリック →「表示名を変更…」／設定画面の ✎ から開く。
+         maxlength は main の PROJECT_NAME_MAX（40）と揃える -->
+    <div id="rename-dialog" hidden>
+      <form id="rename-form" class="dialog-card">
+        <div class="dialog-title">表示名を変更</div>
+        <div id="rename-folder" class="dialog-desc"></div>
+        <input id="rename-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="表示名" />
+        <div class="dialog-hint">空にするとフォルダ名に戻ります。前面化の対象探索はフォルダ名のまま変わりません。</div>
+        <div class="dialog-actions">
+          <button type="button" id="rename-cancel" class="btn-secondary">キャンセル</button>
+          <button type="submit" id="rename-save" class="btn-primary">保存</button>
+        </div>
+      </form>
     </div>
   </div>
   <script src="./renderer.js" type="module"></script>

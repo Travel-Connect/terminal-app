@@ -1,125 +1,321 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>完了報告 — terminal-app リファクタ・バグ調査・GitHub プッシュ（2026-07-11）</title>
+<title>terminal-app 未接続タイルの灰色表示・表示/非表示トグル（260903_1）と表示名の変更（260903_2） — 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-03T05:39:25+0900","subject":"terminal-app 未接続タイルの灰色表示・表示/非表示トグル（260903_1）と表示名の変更（260903_2）","state":"完了","score":90,"open_tasks":2,"blockers":0} -->
 <style>
-  body{font-family:sans-serif;margin:0;padding:16px;background:#f5f6f8;color:#222;line-height:1.6}
-  main{max-width:720px;margin:0 auto}
-  section{background:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;
-          box-shadow:0 1px 2px rgba(0,0,0,.08)}
-  h1{font-size:1.2rem}h2{font-size:1rem;margin:0 0 8px}
-  .blocker{border-left:4px solid #2e7d32}
-  .badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.8rem}
-  .ok{background:#e6f4ea;color:#1e7e34}
-  .ng{background:#fdecea;color:#c0392b}
-  .todo{background:#fff4e5;color:#8a5300}
-  .unk{background:#eceff1;color:#455a64}
-  ul,ol{margin:4px 0;padding-left:20px}
-  pre{overflow-x:auto;background:#f0f1f3;padding:8px;border-radius:6px}
-  table{border-collapse:collapse;font-size:.9rem;width:100%}
-  td,th{border-bottom:1px solid #e0e0e0;padding:4px 10px;text-align:left;vertical-align:top}
-  code{background:#f0f1f3;padding:0 4px;border-radius:4px}
-  a{color:#1565c0}
+  :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
+          --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  main { max-width:1120px; margin:0 auto; }
+  header { margin-bottom:20px; }
+  h1 { margin:0 0 8px; font-size:28px; }
+  h2 { margin:0 0 12px; font-size:18px; }
+  h3 { margin:0 0 8px; font-size:15px; }
+  .meta { color:var(--muted); font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; }
+  .card { grid-column:span 12; background:var(--card); border:1px solid var(--border);
+          border-radius:14px; padding:18px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  section.card { margin-bottom:16px; }
+  .span-3 { grid-column:span 3; } .span-4 { grid-column:span 4; }
+  .span-6 { grid-column:span 6; } .span-8 { grid-column:span 8; } .span-12 { grid-column:span 12; }
+  .status { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+            font-size:13px; font-weight:700; border:1px solid var(--border); white-space:nowrap; }
+  .ok { color:var(--ok); background:#dcfce7; }   .warn { color:var(--warn); background:#fef3c7; }
+  .bad { color:var(--bad); background:#fee2e2; } .info { color:var(--info); background:#dbeafe; }
+  .score { font-size:44px; font-weight:800; line-height:1; }
+  .score small { font-size:18px; color:var(--muted); }
+  .summary-list { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .summary-item { border:1px solid var(--border); border-radius:12px; padding:14px; background:#fafafa; }
+  .summary-item strong { display:block; margin-bottom:6px; }
+  .table-wrap { width:100%; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { border-bottom:1px solid var(--border); padding:10px 8px; vertical-align:top; text-align:left; }
+  th { color:var(--muted); font-weight:700; background:#fafafa; }
+  ul, ol { margin:8px 0 0; padding-left:22px; }
+  details { border:1px solid var(--border); border-radius:12px; padding:12px; background:#fafafa; }
+  summary { cursor:pointer; font-weight:700; }
+  .muted { color:var(--muted); }
+  .priority-high { font-weight:700; color:var(--bad); }
+  .priority-mid  { font-weight:700; color:var(--warn); }
+  .priority-low  { font-weight:700; color:var(--muted); }
+  a { color:var(--info); word-break:break-all; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:6px; font-size:13px; word-break:break-all; }
+  .copy { user-select:all; display:inline-block; background:#1f2937; color:#f9fafb;
+          padding:5px 10px; border-radius:8px; font-family:Consolas,monospace; font-size:13px; }
+  .reply-box { margin-top:6px; border:1px dashed var(--info); border-radius:8px; background:#eff6ff; padding:8px 10px; }
+  .reply-label { display:block; font-size:12px; color:var(--info); font-weight:700; }
+  .reply-box pre { margin:4px 0 0; white-space:pre-wrap; font-family:inherit; font-size:14px; user-select:all; }
+  .check-cell { display:inline-flex; gap:6px; align-items:center; white-space:nowrap; }
+  .check-cell input { width:16px; height:16px; }
+  @media (max-width:760px) {
+    body { padding:14px; }
+    .span-3, .span-4, .span-6, .span-8 { grid-column:span 12; }
+    .summary-list { grid-template-columns:1fr; }
+    table { font-size:13px; }
+    th, td { padding:8px 6px; }
+  }
+  @media print {
+    body { background:#ffffff; padding:0; }
+    .card { box-shadow:none; break-inside:avoid; }
+  }
 </style>
 </head>
 <body>
 <main>
-  <h1>完了報告 — terminal-app リファクタ・バグ調査・GitHub プッシュ（2026-07-11）</h1>
+  <header>
+    <h1>作業完了ダッシュボード</h1>
+    <div class="meta">作成日時: 2026-09-03 05:39 / 対象: terminal-app 未接続タイルの灰色表示・表示/非表示トグル（260903_1）と表示名の変更（260903_2） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: d531c25（今回の変更はまだ保存記録していない）</div>
+  </header>
 
-  <section class="blocker"><h2>結論</h2>
-    <p>依頼の 4 点をすべて完了しました。
-    (1) <strong>バグ調査</strong> — 全モジュール監査で 13 件発見、7 件修正・6 件を理由付きで見送り（<code>docs/bug-audit.md</code>）。
-    (2) <strong>機能非破壊のリファクタリング</strong> — 既存テストを一切改変せず、テスト 89 件 / 型検査 / lint / build すべて exit 0 のまま構造を整理。
-    (3) <strong>GitHub</strong> — プライベートリポジトリ <a href="https://github.com/kurocoma/terminal-app">kurocoma/terminal-app</a> に全ソースをプッシュ済み。
-    (4) 本 HTML 報告。ブロッカーはありません。</p>
+  <section class="card" id="sec-0">
+    <h2>0. 3秒サマリー</h2>
+    <div class="summary-list">
+      <div class="summary-item"><strong>結論</strong>
+        <span class="status ok">完了</span><p>頼まれた 2 機能を実装し、自動テスト・実画面の動作確認まで通しました。Cursor で開いていないタイルは灰色になり、画面右下のスイッチで隠せます。タイルの表示名も自由に変えられます。</p></div>
+      <div class="summary-item"><strong>あなたの対応</strong>
+        <span class="status warn">必要</span>
+        <p>今動いている terminal-app はまだ古い版です。再起動すると新機能が使えます。「再起動して」と返信するか、ご自身で再起動ボタンを押してください（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
+      <div class="summary-item"><strong>作業を止めている問題（ブロッカー）</strong>
+        <span class="status ok">該当なし</span><p>失敗した検証はありません。</p></div>
+    </div>
   </section>
 
-  <section><h2>1. バグ調査の結果（詳細: docs/bug-audit.md）</h2>
-    <ul>
-      <li><span class="badge ok">完了</span> 対象: <code>src/</code> 全 14 モジュール＋ <code>scripts/</code>。観点別（リソースリーク / エラーハンドリング / 非同期競合 / 境界値 / Windows 固有）に通読監査</li>
-      <li><span class="badge ok">修正 7 件</span> 主なもの:
-        <ul>
-          <li>受信ボディの UTF-8 チャンク境界文字化け（Buffer 蓄積へ変更・event-server）</li>
-          <li>listen 成功後の 'error' リスナー残存によるクラッシュ/握りつぶしリスク（event-server）</li>
-          <li>レイテンシ計測 Map・登録解除後セッションのメモリ単調増加 2 件（常駐アプリのため長期稼働で効く）</li>
-          <li>Windows の rename 失敗時に .tmp ファイルが堆積（hooks-manager）</li>
-          <li>多重起動時の「ポート使用中」誤ダイアログ競合窓 / <code>--capture-delay</code> 非数値で即キャプチャされる境界値</li>
-        </ul></li>
-      <li><span class="badge unk">見送り 6 件</span> 全件に理由を明記（例: ログローテの UTC 基準は実害が境界 9h ズレのみ、127.0.0.1 バインドのため低速送信対策は過剰防御 等）</li>
-    </ul>
+  <section class="card" id="sec-1">
+    <h2>1. 状態カード</h2>
+    <div class="grid">
+      <div class="card span-3"><h3>完了状態</h3>
+        <p><span class="status ok">完了</span></p></div>
+      <div class="card span-3"><h3>報告の確かさ</h3>
+        <p><span class="status ok">高</span></p><p class="muted">単体テスト 328 件・実画面を操作する自動確認（E2E）・実環境のウィンドウ一覧での判定確認をすべて実行し、結果を目視しました</p></div>
+      <div class="card span-3"><h3>自己採点</h3>
+        <div class="score">90<small>/100</small></div></div>
+      <div class="card span-3"><h3>情報の新しさ</h3>
+        <p>作成 2026-09-03 05:39。最後の動作確認（E2E 再実行・非デモ起動）は 05:38〜05:39</p></div>
+      <div class="card span-12"><h3>画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
+        <p><span class="status info">対象外（Web アプリではない）</span>
+           terminal-app は Windows 用のデスクトップアプリ（Electron）のため、ブラウザで開く確認サーバーはありません。</p>
+        <p>確認する画面: 実際の見え方は「11. 検証・実施ログ」のスクリーンショット（file:/// リンク）で確認できます。新機能を手元で使うにはアプリの再起動が必要です（2 章）。</p>
+        </div>
+    </div>
   </section>
 
-  <section><h2>2. リファクタリング（機能非破壊）</h2>
-    <ul>
-      <li><span class="badge ok">完了</span> 定数の一元化 — <code>src/main/constants.ts</code>（ポート / イベントパス / hooks マーカー / ボディ上限）を event-server・hooks-manager・project-store が共有。重複リテラルを排除</li>
-      <li><span class="badge ok">完了</span> 表示整形の純関数分離 — <code>src/renderer/format.ts</code>（経過時間・相対時刻・ステータスバー表記）。DOM 非依存になり単体テスト 15 件でカバー</li>
-      <li><span class="badge ok">完了</span> 共有型の一本化 — <code>src/shared/types.d.ts</code> に main / preload / renderer の型を集約し重複定義を解消</li>
-      <li><span class="badge ok">完了</span> hooks マーカー判定の厳格化 — 「terminal-app 部分一致」→「URL パス <code>/terminal-app/event</code> 一致」。ユーザー自身の hook を誤除去するハザードを解消（前回懸念事項の消化）</li>
-      <li><span class="badge ok">完了</span> StateStore の責務整理 — プロジェクト解除時のセッション破棄を <code>removeProjectSessions()</code> として StateStore 側に集約</li>
-      <li><span class="badge ok">完了</span> 非破壊の証明 — tests/ の既存ファイルは無改変のまま全テスト通過。公開 API・レスポンスコード・表示仕様は不変</li>
-    </ul>
+  <section class="card" id="sec-2">
+    <h2>2. あなたの次のアクション</h2>
+    <p class="muted">上から順に対応してください。「返信で選ぶ」は、チャットに記号1文字（例: A）だけ返信すれば伝わります。
+       黒い枠のコマンドは1回クリックすると全文が選択されるので、そのまま Ctrl+C でコピーできます。<br>
+       ※ 左端のチェックはこの画面上だけの目印です。ページを再読み込みすると消えます。</p>
+    <div class="table-wrap"><table>
+      <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / 返信）</th></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
+        <td><span class="status warn">返信で選ぶ</span></td>
+        <td>今動いている terminal-app を再起動して新機能を反映する（再起動するとタイルの状態表示は一度リセットされ、必要なら右クリック→「再接続」で拾い直せます）</td>
+        <td><strong>A</strong> = 「再起動して」と返信（AI が今のアプリを終了→ start-app.bat で起動し直す）（推奨） / <strong>B</strong> = ご自身で terminal-app 右上の「↻（アプリを再起動）」ボタンを押す</td></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
+        <td><span class="status bad">今すぐ・目で確認</span></td>
+        <td>再起動後、Cursor で開いていないタイル（zaico-kanri-app など 8 件が該当する見込み）が灰色になり、画面右下「未接続を表示（N）」のスイッチで消えることを確認する</td>
+        <td>スクリーンショットで先に見る: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/05-main-unlinked-hidden.png">05-main-unlinked-hidden.png（スイッチ OFF で灰色タイルが消えた画面）</a></td></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>3</td>
+        <td><span class="status warn">返信で選ぶ</span></td>
+        <td>今回の変更を保存記録（commit）するか決める。※ 前回作業分（D&amp;D 登録・手動ステータス）も未保存のまま作業ツリーに残っており、一緒に保存されます</td>
+        <td><strong>A</strong> = 「コミットして」と返信（今回分と前回分をまとめて 1 件で保存記録） / <strong>B</strong> = 「今回分だけコミットして」と返信（ファイル単位で分けて保存記録） / <strong>C</strong> = まだ保存しない</td></tr>
+    </table></div>
   </section>
 
-  <section><h2>3. 検証結果（プッシュ直前に全件再実行）</h2>
-    <table>
-      <tr><th>検証</th><th>コマンド</th><th>結果</th></tr>
-      <tr><td>単体・統合テスト</td><td><code>npm test</code></td><td><span class="badge ok">exit 0</span> 7 ファイル / 89 テスト passed（フォローアップ後: 9 ファイル / 97 テスト）</td></tr>
-      <tr><td>型検査（main / renderer / tests）</td><td><code>npm run typecheck</code></td><td><span class="badge ok">exit 0</span></td></tr>
-      <tr><td>静的解析</td><td><code>npm run lint</code></td><td><span class="badge ok">exit 0</span></td></tr>
-      <tr><td>ビルド</td><td><code>npm run build</code></td><td><span class="badge ok">exit 0</span></td></tr>
-    </table>
-    <p>※ 送信中のローディング表示はご確認いただいたとおり正常動作（ご報告に基づく。今回の変更でも renderer の表示仕様には触れていません）。</p>
+  <section class="card" id="sec-3">
+    <h2>3. 今回の差分</h2>
+    <div class="table-wrap"><table>
+      <tr><th>区分</th><th>内容</th></tr>
+      <tr><td>前回からの推移</td><td>状態: 一部完了（2026-07-29・D&amp;D 登録不具合の調査、別テーマ）→ 完了（今回） / 自己採点: 81 → 90 / 残タスク: 3件 → 2件（前回の 3 件は別テーマのため今回の集計に含めていません。状況は未確認）</td></tr>
+      <tr><td>新しく完了</td><td>(1) 未接続タイルの灰色表示（対象アプリのウィンドウ有無を約 5 秒ごとに判定） (2) 画面右下の表示／非表示スイッチ（設定は config.json に保持） (3) タイル右クリック／設定画面からの表示名変更ダイアログ（空でフォルダ名に戻る・40 文字上限）</td></tr>
+      <tr><td>新しく発生した懸念</td><td>「つながっていない」の判定はウィンドウのタイトル文字列で行うため、Cursor がフォルダ名をタイトルに出さない特殊なケースでは灰色になりうる（8 章）。実行中・確認待ちのタイルは灰色にしない安全策を入れています</td></tr>
+      <tr><td>解消済み</td><td>該当なし（前回の残タスクは別テーマ）</td></tr>
+      <tr><td>未変化</td><td>前回作業分（D&amp;D 登録・手動ステータス）は未保存のまま作業ツリーに残っています</td></tr>
+    </table></div>
   </section>
 
-  <section><h2>4. GitHub リポジトリ</h2>
-    <ul>
-      <li>URL: <a href="https://github.com/kurocoma/terminal-app">https://github.com/kurocoma/terminal-app</a>（<strong>private</strong> / アカウント: kurocoma）</li>
-      <li>プッシュ内容: src / tests / scripts / docs（spec・design・verification・bug-audit）/ README / 本報告 HTML / 各種設定</li>
-      <li>除外（.gitignore）: <code>node_modules/</code> <code>dist/</code> <code>*.log</code> <code>.loop/</code>（採点基準・ループ状態）<code>.claude/</code>（マシンローカル hooks 設定）</li>
-    </ul>
+  <section class="card" id="sec-4">
+    <h2>4. 現状サマリー</h2>
+    <div class="table-wrap"><table>
+      <tr><th>目的</th><td>(1) Cursor で開いていないプロジェクトのタイルを一目で見分けられるよう灰色にし、必要なら隠せるようにする (2) タイルの表示名をフォルダ名以外に自由に変えられるようにする</td></tr>
+      <tr><th>今回できたこと</th><td>両方を実装。単体テスト 24 件を追加（全 328 件成功）、実画面を自動操作する確認（E2E）で 11 項目すべて成功、実環境の 20 プロジェクト × 現在のウィンドウ 63 件で判定結果を確認（未接続 8 件）。README と再利用できる E2E スクリプトも追加</td></tr>
+      <tr><th>まだ残っていること</th><td>今動いているアプリの再起動（新機能の反映）と、変更の保存記録（commit）の判断</td></tr>
+      <tr><th>作業を止めている問題</th><td>該当なし</td></tr>
+    </table></div>
   </section>
 
-  <section><h2>5. 追記: フォローアップ検証（同日深夜。証跡: docs/evidence/20260711-followup/）</h2>
-    <ul>
-      <li><span class="badge ok">完了</span> <strong>実 Claude Code セッションの実発火を 3 経路で実測</strong> —
-        (1) 本開発セッション自身の UserPromptSubmit / Stop が実稼働アプリに実受信、
-        (2) 信頼済みディレクトリでのヘッドレス <code>claude -p</code>、
-        (3) サンドボックス通し検証 <code>scripts/verify-real-session.mjs</code>（実 claude 発火 → 実行中 → 完了、ui-latency 2〜6ms ≤ 1000ms = NFR-01 実発火で確認）。手動枠 #4・#5 を解消</li>
-      <li><span class="badge ok">完了</span> <strong>V-09 前面化・最小化復元の実測 7/7 PASS</strong> — <code>scripts/verify-foreground.mjs</code> が実ターミナルウィンドウで前面化（#8）と最小化からの復元＋前面化（#9）を GetForegroundWindow / IsIconic で確認。実運用ログにもユーザー実クリックの「前面化 成功」多数</li>
-      <li><span class="badge ok">完了</span> 再起動後の登録保持＋状態揮発（#12 / T-10）・アプリ未起動時の無害性（#15 / V-14 — 実 hook コマンド 2 秒打ち切り・実セッション完走）を自動実測化</li>
-      <li><span class="badge ok">完了</span> <strong>回帰テスト 8 件追加</strong>（UTF-8 チャンク境界 / removeProjectSessions — bug-audit #1・#6 の直接カバー）。テストは 89 → <strong>97 件</strong>全 green（既存テスト無改変）</li>
-      <li><span class="badge ng">新規バグ 3 件発見 → 修正済み</span> 検証を実稼働アプリと並走させて顕在化（bug-audit.md 4 章 #14〜#16）:
-        <ul>
-          <li>#14 config.json の <code>port</code> 変更が受信サーバに反映されない（初期化順序）</li>
-          <li>#15 ポート使用中のエラーダイアログが起動を塞ぐ（「UI は起動継続」にならない）</li>
-          <li>#16 検証・デモ実行の Chromium プロファイルが実稼働と共有され並走時に競合</li>
-        </ul></li>
-    </ul>
+  <section class="card" id="sec-5">
+    <h2>5. プラン進捗（計画の進み具合）</h2>
+    <div class="table-wrap"><table>
+      <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
+      <tr><td>「つながっていない」の判定（対象アプリのウィンドウ有無を定期判定）</td><td><span class="status ok">完了</span></td><td><code>src/main/window-presence.ts</code>（判定の純関数）・<code>src/main/index.ts</code> の pollWindowPresence（5 秒ごと・変化時のみ配信）</td></tr>
+      <tr><td>灰色表示（実行中・確認待ちは除外）</td><td><span class="status ok">完了</span></td><td><code>src/renderer/format.ts</code> isUnlinked・<code>styles.css</code> .tile.is-unlinked・ツールチップに復帰導線</td></tr>
+      <tr><td>表示／非表示のスイッチ（設定保持）</td><td><span class="status ok">完了</span></td><td>ステータスバー右端「未接続を表示（N）」。<code>config.json</code> showUnlinked（既定 true）</td></tr>
+      <tr><td>表示名の変更（右クリック／設定画面 ✎ → ダイアログ）</td><td><span class="status ok">完了</span></td><td><code>project-store.ts</code> renameProject・IPC set-project-name・<code>index.html</code> #rename-dialog</td></tr>
+      <tr><td>デモモードへの反映（キャプチャ証跡用）</td><td><span class="status ok">完了</span></td><td><code>src/main/demo.ts</code> unlinked シード 3 件</td></tr>
+      <tr><td>自動テスト・E2E・実環境確認</td><td><span class="status ok">完了</span></td><td>tests/ 4 ファイル新規、<code>scripts/verify-unlinked-rename-e2e.mjs</code>、docs/evidence/20260903-unlinked-rename/</td></tr>
+      <tr><td>文書更新</td><td><span class="status ok">完了</span></td><td><code>README.md</code>（機能説明・環境変数・検証コマンド）</td></tr>
+      <tr><td>稼働中アプリへの反映（再起動）</td><td><span class="status warn">未着手</span></td><td>タイル状態がリセットされるため、タイミングはユーザー判断（2 章 1 行目）</td></tr>
+    </table></div>
   </section>
 
-  <section><h2>残タスク（持ち越し）</h2>
-    <ul>
-      <li>手動 E2E の残り: #2 実マウスでの D&amp;D 登録・#6 呼吸発光の動的な見え方・#13 テーマのモック比較（いずれも目視枠）</li>
-      <li>OPEN-03: claude プロセス強制終了時に何が発火するかの実測（受信側の受け口は実装済み）</li>
-      <li>見送りバグ 6 件の再評価（実運用で顕在化した場合のみ。判断根拠は bug-audit.md に記録済み）</li>
-    </ul>
+  <section class="card" id="sec-6">
+    <h2>6. 残タスク</h2>
+    <div class="table-wrap"><table>
+      <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td>
+        <td class="priority-high">高</td><td>稼働中の terminal-app を再起動する</td><td>ビルド済みの新版はディスクにあるが、動いているアプリは古い版のまま</td><td>2 章 1 行目（A/B）</td></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td>
+        <td class="priority-mid">中</td><td>変更を保存記録（commit）する</td><td>前回作業分と混在しているため分け方の判断が要る</td><td>2 章 3 行目（A/B/C）</td></tr>
+    </table></div>
   </section>
 
-  <section><h2>懸念事項</h2>
-    <ul>
-      <li>アプリ停止中の hook 発火は毎イベント約 2 秒のタイムアウト待ちが発生（既知・仕様許容内。--connect-timeout で短縮の余地）</li>
-      <li>ログローテーションが UTC 日付基準（JST 朝 9 時切替）— 実害なしと判断し見送り（bug-audit #8）</li>
-      <li>ポートを変更した場合は再起動後に各プロジェクトへ hooks が自動再追記される（起動時追補）が、旧ポート宛ての hook エントリは残るため手動整理が必要になる場合がある</li>
-      <li>リポジトリは private 作成。公開（public 化）やコラボレータ追加が必要なら指示ください</li>
-    </ul>
+  <section class="card" id="sec-7">
+    <h2>7. 自己採点</h2>
+    <div class="table-wrap"><table>
+      <tr><th>観点</th><th>配点</th><th>得点</th><th>根拠</th></tr>
+      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>28</td><td>灰色表示・スイッチ・表示名変更の 3 点をすべて実装。「つながっていない」の定義（対象アプリのウィンドウ有無）は私の解釈で、確認待ち（9 章 1 番）のため 2 点減</td></tr>
+      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>既存の判定関数（前面化・切断検知と同じ hasWindowFor）を再利用し判定基準を 1 か所に保った。判定の純関数を分離しテスト可能に。型チェック・Lint ともエラーなし</td></tr>
+      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>18</td><td>単体テスト 328 件成功、E2E 11 項目成功、非デモ起動で実際のウィンドウ列挙まで確認。稼働中アプリでの確認だけ未実施（再起動待ち）</td></tr>
+      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>タイトル一致の誤判定に備え、実行中・確認待ちのタイルは灰色にしない安全策。判定不能時は「接続あり」扱い。列挙コストは 63 窓で 35ms と実測</td></tr>
+      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>スクリーンショット 5 枚＋実環境の判定一覧を添付。設計判断（除外規則・既定値）を 9 章で選択肢化</td></tr>
+      <tr><th>総合</th><th>100</th><th>90</th><th>実装・検証は完了。定義の妥当性確認と稼働中アプリへの反映が残る</th></tr>
+    </table></div>
   </section>
 
-  <section><h2>推奨される次の一手</h2>
+  <section class="card" id="sec-8">
+    <h2>8. 懸念事項</h2>
+    <div class="table-wrap"><table>
+      <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
+      <tr><td class="priority-mid">中</td><td>判定はウィンドウのタイトルにフォルダ名が含まれるかで行う（前面化と同じ仕組み）。フォルダ名が別プロジェクト名の一部（例: dev）だと他のウィンドウで「接続あり」になりうる</td><td>本来灰色のタイルが通常表示になる（隠れない側なので実害は小さい）</td><td>実運用で気になる例が出たら報告してください。フォルダ名の完全一致条件に切り替えられます</td></tr>
+      <tr><td class="priority-low">低</td><td>灰色タイルにも「完了」等のセッション状態は残る。スイッチで隠している間は「N完了」の件数だけ見えてタイルが無い状態になりうる</td><td>件数とタイル数の食い違いに一瞬戸惑う可能性</td><td>「未接続を表示」のスイッチを ON にすれば一致します。必要なら件数側も除外できます</td></tr>
+      <tr><td class="priority-low">低</td><td>アプリ再起動でタイルのセッション状態は一度リセットされる（既存仕様）</td><td>再起動直後は「待機」表示が増える</td><td>右クリック →「再接続」で拾い直せます</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-9">
+    <h2>9. 確認事項</h2>
+    <p class="muted">記号だけ返信すれば伝わります（例: 「1-A 2-B」）。全部おまかせなら「全部A」でも大丈夫です。</p>
+    <div class="table-wrap"><table>
+      <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
+      <tr><td>1</td><td class="priority-mid">中</td><td>「つながっていない」の定義。今回は「クリックで開く対象アプリ（Cursor／ターミナル）でそのフォルダを開いたウィンドウが無い」とし、実行中・確認待ちのタイルは灰色にしていません</td>
+        <td><strong>A</strong> = この定義のままでよい（推奨） / <strong>B</strong> = 実行中・確認待ちも含め、ウィンドウが無ければ必ず灰色にする（作業中のタイルも隠れうる） / <strong>C</strong> = セッションが無い「待機」タイルだけを灰色にする（ウィンドウは見ない）</td></tr>
+      <tr><td>2</td><td class="priority-low">低</td><td>スイッチの初期値。今は「表示（灰色で見せる）」が既定で、OFF にすると隠れます</td>
+        <td><strong>A</strong> = 今のまま（初回は灰色で見せる）（推奨） / <strong>B</strong> = 最初から隠す（初回起動でタイルが減って見える）</td></tr>
+      <tr><td>3</td><td class="priority-low">低</td><td>スイッチの置き場所。今は画面右下のステータスバー右端です</td>
+        <td><strong>A</strong> = 今のまま（推奨） / <strong>B</strong> = 画面右上のアイコンボタンにする（ピン留めボタンの隣。見た目は目のアイコン）</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-10">
+    <h2>10. 対象外・未対応（今回やっていないこと）</h2>
+    <ul><li>稼働中の terminal-app の再起動（タイル状態がリセットされるため、タイミングはお任せします）</li>
+      <li>変更の保存記録（commit）と PR（変更をレビューしてもらう依頼）の作成。指示があれば行います</li>
+      <li>設計書（docs/design.md）への追記。過去の追加機能も README のみの更新だったため同じ扱いにしました</li>
+      <li>「未接続のタイルを非表示にしています」という全件非表示時の案内文の見た目確認（コード上は実装済み。今回の E2E では 10 件が残る状況のため表示されていません）</li></ul>
+  </section>
+
+  <section class="card" id="sec-11">
+    <h2>11. 検証・実施ログ</h2>
+    <div class="table-wrap"><table>
+      <tr><th>項目</th><th>結果</th><th>内容</th></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">18件</span></td><td>変更 12: src/main/index.ts・project-store.ts・demo.ts、src/preload/index.ts、src/renderer/renderer.ts・index.html・styles.css・format.ts、src/shared/types.d.ts、README.md ほか / 新規 6: src/main/window-presence.ts、tests/ 4 ファイル、scripts/verify-unlinked-rename-e2e.mjs</td></tr>
+      <tr><td>動作テスト（単体テスト）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>（プログラムの部品ごとの自動テスト）: 38 ファイル / 328 件すべて成功。今回 4 ファイル・24 件を追加（判定ロジック・表示規則・設定保持・表示名変更）</td></tr>
+      <tr><td>動作テスト（実画面の自動操作 E2E）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-unlinked-rename-e2e.mjs docs/evidence/20260903-unlinked-rename</code>（デモ起動を遠隔操作して画面を実際に操作する確認）: 11 項目すべて OK、終了コード 0。スクリーンショット 5 枚を保存</td></tr>
+      <tr><td>動作テスト（非デモの実起動）</td><td><span class="status ok">成功</span></td><td>一時フォルダ 2 件を登録した状態で起動し、実際のウィンドウ列挙で「接続 1 / 未接続 1 [no-window-xyz]」と判定・灰色表示をキャプチャ（実 hooks・実設定には触れていない）</td></tr>
+      <tr><td>実環境データでの判定確認</td><td><span class="status ok">成功</span></td><td>実際の登録 20 件 × 今開いているウィンドウ 63 件で判定: 未接続 8 件（zaico-kanri-app・oshirase-update・入庫スキャンアプリ・shopifyカレンダー作成・obsidian-vault・mizunosangyo・SuperSaleItemRegistration・mailmagazine-createtool）。列挙 35ms（5 秒ごとでも負荷は無視できる）</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を実行可能な JavaScript に変換し dist/ へ出力）: エラーなし</td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>・<code>npm run lint</code>（型の整合性と書き方の自動チェック）: エラーなし</td></tr>
+      <tr><td>稼働中アプリでの動作</td><td><span class="status warn">未実施</span></td><td>今動いているアプリ（PID 41384）は古い版のまま。再起動していないため、実環境での最終確認は未実施</td></tr>
+    </table></div>
+    <details><summary>詳細ログ・スクリーンショット</summary>
+      <p><strong>E2E スクリーンショット（リポジトリ内・docs/evidence/20260903-unlinked-rename/）</strong></p>
+      <ul>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/01-settings-project-rows.png">01 設定画面のプロジェクト行（✎ ボタン）</a><br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260903-unlinked-rename\01-settings-project-rows.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/02-rename-dialog.png">02 表示名の変更ダイアログ</a><br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260903-unlinked-rename\02-rename-dialog.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/03-rename-too-long.png">03 41 文字入力の拒否メッセージ</a><br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260903-unlinked-rename\03-rename-too-long.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/04-main-renamed-tile.png">04 改名後のタイル＋灰色タイル 2 件（スイッチ ON）</a><br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260903-unlinked-rename\04-main-renamed-tile.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260903-unlinked-rename/05-main-unlinked-hidden.png">05 スイッチ OFF で灰色タイルが消えた画面</a><br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260903-unlinked-rename\05-main-unlinked-hidden.png</code></li>
+      </ul>
+      <p><strong>追加キャプチャ（一時フォルダ・PC 再起動で消えることがあります）</strong></p>
+      <ul>
+        <li><a href="file:///C:/Users/hppym/AppData/Local/Temp/ta-ev/show16/capture-show16.png">16 タイル配置（待機タイルの灰色表示を含む）</a><br><code>C:\Users\hppym\AppData\Local\Temp\ta-ev\show16\capture-show16.png</code></li>
+        <li><a href="file:///C:/Users/hppym/AppData/Local/Temp/ta-ev/real/capture-real.png">非デモ実起動（実ウィンドウ列挙で 1 件だけ灰色）</a><br><code>C:\Users\hppym\AppData\Local\Temp\ta-ev\real\capture-real.png</code></li>
+      </ul>
+      <p><strong>E2E の主な出力（抜粋）</strong></p>
+      <pre>OK  ダイアログが現在名・フォルダ付きで開きフォーカスされる
+OK  保存でダイアログが閉じ、行名とステータスバーに反映: 表示名を変更しました: 在庫管理-app → 在庫管理（本番）
+OK  projects.json に永続化（path は不変）
+OK  41 文字は拒否され、ダイアログは開いたまま: 表示名は 40 文字以内にしてください
+OK  空入力はフォルダ名へ戻る
+OK  未接続 2 件が灰色（実行中の問い合わせbot は除外）・全 12 タイル表示・トグル ON
+OK  トグル OFF で未接続 2 件が消え 10 タイル表示
+OK  config.json に showUnlinked=false が保持
+ALL OK</pre>
+      <p><strong>非デモ実起動のログ（抜粋）</strong></p>
+      <pre>ウィンドウ判定（初回）: 接続 1 / 未接続 1 [no-window-xyz]</pre>
+    </details>
+  </section>
+
+  <section class="card" id="sec-12">
+    <h2>12. 実行体制（どのAIが作業したか）</h2>
+    <p class="muted">この作業を担当したAI（人工知能プログラム）の一覧です。モデルID（AIの種類を表す正式な名前。
+       人でいう「担当者名」にあたる）で、どのAIが何をしたかを確認できます。</p>
+    <div class="table-wrap"><table>
+      <tr><th>役割</th><th>担当</th><th>モデルID</th><th>備考</th></tr>
+      <tr><td>進行管理（全体のとりまとめ）</td><td>メインセッション（この会話のAI）</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
+      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
+      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記（サブエージェント・Codex は未使用）</td></tr>
+      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-13">
+    <h2>13. ステータス凡例・用語ミニ辞典</h2>
+    <p class="muted">完了=動作確認済みで残作業なし / 一部完了=一部のみ達成 / 未実施=実行していない /
+       未確認=情報を取得できていない / ブロック=作業を止める問題があり進めない。<br>
+       ※ この報告書は保存した時点の記録です。「起動中」などの状態は、開いた時点では変わっている可能性があります。</p>
+    <div class="table-wrap"><table>
+      <tr><th>用語</th><th>意味</th></tr>
+      <tr><td>モデルID</td><td>AIの種類を表す正式な名前。同じ「Claude」でも性能や世代が違うため、この名前でどのAIが作業したかを特定できる</td></tr>
+      <tr><td>未接続タイル</td><td>クリックで開く対象アプリ（Cursor／ターミナル）でそのフォルダを開いたウィンドウが見つからないタイル。灰色で表示される</td></tr>
+      <tr><td>トグル（スイッチ）</td><td>ON/OFF を切り替える小さなスイッチ。今回は画面右下「未接続を表示（N）」</td></tr>
+      <tr><td>E2E テスト</td><td>実際の画面操作をなぞる動作確認。今回はデモ起動したアプリを遠隔操作して行った</td></tr>
+      <tr><td>単体テスト</td><td>プログラムの部品ごとの自動テスト（vitest というツールで実行）</td></tr>
+      <tr><td>ビルド</td><td>プログラムを動く形に変換する処理（npm run build）</td></tr>
+      <tr><td>Lint / 型チェック</td><td>コードの書き方・整合性の自動チェック</td></tr>
+      <tr><td>config.json / projects.json</td><td>アプリの設定と登録プロジェクトを保存するファイル（%APPDATA%\terminal-app 内）</td></tr>
+      <tr><td>hooks</td><td>Claude Code がイベント発生時に呼び出す仕組み。プロジェクト登録時に自動追記される</td></tr>
+      <tr><td>commit（コミット）</td><td>変更の保存記録。まだ行っていない</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-14">
+    <h2>14. AIが次にできること（あなたの操作は不要）</h2>
     <ol>
-      <li>GitHub 上でコミット内容を一読 → 問題なければこのまま実運用（README の手順で起動し実プロジェクトを D&amp;D）</li>
-      <li>実運用で気になる挙動があれば bug-audit.md の見送り 6 件と照合のうえ次周回で対応します</li>
+      <li>稼働中の terminal-app を終了→起動し直して新機能を反映する（タイル状態は一度リセット）
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>再起動して</pre>
+        </div>
+      </li>
+      <li>今回の変更を保存記録（commit）する（前回分との分け方は 2 章 3 行目の選択に従う）
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>今回分だけコミットして</pre>
+        </div>
+      </li>
+      <li>9 章の選択に応じて判定規則・既定値・スイッチの位置を変更する
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>1-A 2-A 3-A で進めて</pre>
+        </div>
+      </li>
     </ol>
   </section>
 </main>

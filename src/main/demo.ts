@@ -16,21 +16,25 @@ interface DemoSeed {
   ago: number;
   /** 現在の作業テキスト（260712 課題B の表示確認用。実運用では UserPromptSubmit の prompt 由来） */
   work?: string;
+  /** 手動ステータス（260727_1 のバッジ表示確認用。実運用ではタイル右クリックで割り当て） */
+  status?: string;
+  /** 未接続（260903_1 の灰色表示確認用。実運用では対象アプリのウィンドウ有無を EnumWindows で判定） */
+  unlinked?: boolean;
 }
 
 /** モック面 1b の 12 タイル構成（context-design-mock.md） */
 const MOCK_1B: DemoSeed[] = [
-  { name: "在庫管理-app", state: "done", ago: 120, work: "棚卸し差分のレポートを作成して" }, // 完了・2分前
-  { name: "商品登録-app", state: "running", ago: 48 * 60 + 12, work: "Yahooカテゴリ反映ボタンを追加して" }, // 0:48:12
+  { name: "在庫管理-app", state: "done", ago: 120, work: "棚卸し差分のレポートを作成して", status: "レビュー待ち" }, // 完了・2分前
+  { name: "商品登録-app", state: "running", ago: 48 * 60 + 12, work: "Yahooカテゴリ反映ボタンを追加して", status: "作業中" }, // 0:48:12
   { name: "メルマガ作成-app", state: "confirm", ago: 60, work: "7月セールの下書きを作って" }, // 確認待ち・1分前
-  { name: "商品ページ作成-app", state: "done", ago: 10 }, // 完了・たった今
+  { name: "商品ページ作成-app", state: "done", ago: 10, unlinked: true }, // 完了・たった今（Cursor は閉じている = 未接続）
   { name: "受注管理-app", state: "running", ago: 15 * 60 + 4 },
   { name: "顧客分析-app", state: "running", ago: 7 * 60 + 41 },
-  { name: "売上レポート-app", state: "error", ago: 8 * 60 }, // エラー・8分前
+  { name: "売上レポート-app", state: "error", ago: 8 * 60, status: "保留", unlinked: true }, // エラー・8分前（未接続）
   { name: "発注最適化-app", state: "running", ago: 32 * 60 + 55 },
   { name: "レビュー返信-app", state: "running", ago: 3 * 60 + 2 },
   { name: "配送追跡-app", state: "running", ago: 51 * 60 + 30 },
-  { name: "問い合わせbot", state: "running", ago: 60 * 60 + 5 },
+  { name: "問い合わせbot", state: "running", ago: 60 * 60 + 5, unlinked: true }, // 実行中はウィンドウ無しでも灰色にしない（isUnlinked の除外規則の確認用）
   { name: "棚卸し-app", state: "running", ago: 2 * 60 * 60 + 15 * 60 + 9 }, // 2:15:09
 ];
 
@@ -38,12 +42,17 @@ const EXTRA_16: DemoSeed[] = [
   { name: "需要予測-app", state: "done", ago: 300 },
   { name: "棚割り-app", state: "confirm", ago: 30 },
   { name: "画像生成-app", state: "error", ago: 600 },
-  { name: "監査ログ-app", state: "waiting-none", ago: 0 }, // 待機（イベント未受信）タイルの確認用
+  { name: "監査ログ-app", state: "waiting-none", ago: 0, unlinked: true }, // 待機（イベント未受信）タイルの確認用（未接続）
 ];
 
-export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, count: 12 | 16 = 12): void {
+/**
+ * シード投入。戻り値は 260903_1 のウィンドウ有無マップ（実運用では index.ts の pollWindowPresence が
+ * EnumWindows で作る値。デモではシードの unlinked から固定値を作り、キャプチャで灰色表示を確認できるようにする）
+ */
+export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, count: 12 | 16 = 12): Record<string, boolean> {
   const seeds = count === 16 ? [...MOCK_1B, ...EXTRA_16] : MOCK_1B;
   const now = Date.now();
+  const presence: Record<string, boolean> = {};
   seeds.forEach((seed, i) => {
     const id = `demo-${String(i + 1).padStart(2, "0")}`;
     const project: Project = {
@@ -52,8 +61,10 @@ export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, cou
       path: `C:\\dev\\demo\\${seed.name}`,
       clickTarget: i % 2 === 0 ? "cursor" : "terminal",
       registeredAt: new Date(now - 86400000).toISOString(),
+      customStatus: seed.status,
     };
     projectStore.addProjectDirect(project);
+    presence[id] = seed.unlinked !== true;
     if (seed.state === "waiting-none") return; // タイルは「待機」表示（セッションなし）
     stateStore.seedSession({
       sessionId: `s-${id}`,
@@ -65,4 +76,5 @@ export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, cou
       workText: seed.work,
     });
   });
+  return presence;
 }

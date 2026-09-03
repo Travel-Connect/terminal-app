@@ -12,25 +12,29 @@
  *   --view=settings      設定画面を初期表示で開く（面 1d / 1f の証跡用）
  */
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, OpResult, Project, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, Snapshot, ThemeSetting, WindowAction } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
+import { extractDropPaths } from "./drop-paths";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
 import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected } from "./liveness-monitor";
 import { Logger } from "./logger";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
+import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { classifyNotification, StateStore } from "./state-store";
 import { focusProjectWindow, hasWindowFor, isAvailable as windowApiAvailable, listTopLevelWindows, type TopLevelWindow } from "./window-control";
+import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -66,6 +70,8 @@ let win: BrowserWindow | null = null;
 let revision = 0;
 let statusMessage = "";
 let pinned = false;
+/** 未接続タイル（260903_1）: projectId → 対象アプリのウィンドウ有無。pollWindowPresence が更新（デモはシード固定値） */
+let windowPresence: WindowPresence = {};
 
 /** NFR-01 計測: revision → イベント受信時刻。renderer の描画完了通知でログ差分を出す（verification.md 3.2） */
 const pendingRender = new Map<number, number>();
@@ -82,6 +88,7 @@ function buildSnapshot(): Snapshot {
     config,
     pinned,
     statusMessage,
+    windowPresence: { ...windowPresence },
   };
 }
 
@@ -181,6 +188,10 @@ function createAppEventServer(): EventServer {
 /* ---------------- 切断検知（260712_2） ---------------- */
 
 let livenessTimer: NodeJS.Timeout | null = null;
+/** 未接続タイル（260903_1）のウィンドウ有無ポーリング */
+let windowPollTimer: NodeJS.Timeout | null = null;
+/** 初回判定済みか（初回ログの要約用） */
+let windowPollDone = false;
 
 const appRestarter = createAppRestarter({
   cleanup: async () => {
@@ -188,6 +199,10 @@ const appRestarter = createAppRestarter({
     if (livenessTimer !== null) {
       clearInterval(livenessTimer);
       livenessTimer = null;
+    }
+    if (windowPollTimer !== null) {
+      clearInterval(windowPollTimer);
+      windowPollTimer = null;
     }
     await devServers.stopAll(); // 起動した開発サーバーを残さない（260722_1）
     await (eventServer?.close() ?? Promise.resolve());
@@ -296,6 +311,42 @@ function sweepLiveness(): void {
     showDisconnectToast(project, name);
   }
   if (changed) broadcast();
+}
+
+/* ---------------- 未接続タイル（260903_1） ---------------- */
+
+/**
+ * 1 回の判定: 登録済み全プロジェクトについて「クリックで開く対象アプリ（Cursor / ターミナル）の
+ * ウィンドウが今あるか」を EnumWindows 1 回分の結果から求め、変化があったときだけ broadcast する。
+ * 判定条件は前面化・切断検知と同じ hasWindowFor（window-presence.ts）。
+ * koffi 未ロード（判定不能）のときは空マップ = renderer は全タイルを「接続あり」扱いにする（安全側）。
+ */
+function pollWindowPresence(): void {
+  let next: WindowPresence = {};
+  if (windowApiAvailable() && projectStore.projects.length > 0) {
+    try {
+      next = computeWindowPresence(projectStore.projects, listTopLevelWindows());
+    } catch (e) {
+      logger.warn(`ウィンドウ有無の判定に失敗（前回値を維持）: ${String(e)}`);
+      return;
+    }
+  }
+  const first = !windowPollDone;
+  windowPollDone = true;
+  if (presenceEquals(windowPresence, next)) return;
+  const diff = presenceDiff(windowPresence, next);
+  if (first) {
+    // 初回は全プロジェクト分の変化になるため 1 行に要約（以後は変化したタイルだけ個別に記録）
+    const unlinked = diff.filter((d) => !d.present).map((d) => projectStore.getProject(d.id)?.name ?? d.id);
+    logger.info(`ウィンドウ判定（初回）: 接続 ${diff.length - unlinked.length} / 未接続 ${unlinked.length}${unlinked.length > 0 ? ` [${unlinked.join(", ")}]` : ""}`);
+  } else {
+    for (const d of diff) {
+      const name = projectStore.getProject(d.id)?.name ?? d.id;
+      logger.info(`ウィンドウ${d.present ? "検出（接続）" : "消失（未接続）"}: ${name}`);
+    }
+  }
+  windowPresence = next;
+  broadcast();
 }
 
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
@@ -508,6 +559,25 @@ function clearProjectDisplay(id: string): void {
   setStatus(`${project.name} の表示をクリアしました`);
 }
 
+/** 手動ステータスの割り当て（260727_1）: 右クリックメニューの確定処理。null = 解除 */
+function setProjectStatus(id: string, status: string | null): void {
+  const project = projectStore.getProject(id);
+  if (project === null) return;
+  if (!projectStore.setCustomStatus(id, status)) return;
+  logger.info(`ステータス変更: ${project.name} → ${status ?? "（なし）"}`);
+  setStatus(status === null ? `${project.name} のステータスを外しました` : `${project.name}: ${status}`);
+  broadcast();
+}
+
+/**
+ * 表示名の変更（260903_2）: 右クリックメニューからは renderer の入力ダイアログを開かせる
+ * （Electron に prompt 相当のネイティブダイアログが無いため、入力 UI は renderer 側に置く）
+ */
+function requestRename(id: string): void {
+  if (win === null || win.isDestroyed()) return;
+  win.webContents.send("rename-request", id);
+}
+
 /** 登録解除は hooks 除去を伴う破壊的操作のため、メニューからは確認を挟む（260712_2） */
 async function confirmAndUnregister(id: string): Promise<void> {
   const project = projectStore.getProject(id);
@@ -548,7 +618,49 @@ function wireIpc(): void {
   ipcMain.handle("get-snapshot", () => buildSnapshot());
 
   ipcMain.handle("register-projects", (_e, paths: string[]): RegisterResult[] => {
-    const results = paths.map((p) => registerProject(p));
+    // フォルダはそのまま登録し、ファイルのドロップのみ .claude / .git を目印にルートへ読み替える
+    // （260729 改定: フォルダの祖先探索は「開発案件/」等の親フォルダ誤登録を招くため廃止）。
+    // 解決不能（パス不存在）は元パスのまま registerProject の検証エラーに落とす
+    const results = paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    broadcast();
+    return results;
+  });
+
+  // D&D 診断ログ（260727_1）: renderer のコンソールは非表示運用のため main のログファイルへ集約する
+  ipcMain.on("dnd-log", (_e, msg: string) => {
+    if (typeof msg === "string") logger.info(`D&D(renderer): ${msg.slice(0, 500)}`);
+  });
+
+  // D&D 登録の本経路（260727_1）: DataTransfer の生ペイロードを受け、パス抽出→ルート解決→登録。
+  // Cursor（VS Code 系）からのドラッグは files が空のため drop-paths のフォールバック抽出が本命
+  ipcMain.handle("register-drop", (_e, payload: DropPayload): RegisterResult[] => {
+    const types = payload.types ?? [];
+    const summary = types.map((t) => `${t}:${(payload.data?.[t] ?? "").length}ch`).join(", ");
+    logger.info(`D&D 受信: files=${(payload.filePaths ?? []).length} types=[${summary}]`);
+    for (const [k, v] of Object.entries(payload.data ?? {})) {
+      if (v !== "") logger.info(`D&D data[${k}]: ${v.slice(0, 300)}`);
+    }
+    const extracted = extractDropPaths(payload);
+    logger.info(`D&D 抽出: source=${extracted.source} paths=[${extracted.paths.join(" | ")}]`);
+    if (extracted.paths.length === 0) {
+      // Cursor（VS Code 系）のツリードラッグは OS ドラッグにパス情報が載らない（OLE プローブで実証済み）
+      return [{ ok: false, path: "", error: "ドロップにパス情報がありません（Cursor のツリーからは登録不可）。エクスプローラからドロップするか、＋ボタンで選択してください" }];
+    }
+    const results = extracted.paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    broadcast();
+    return results;
+  });
+
+  // フォルダ選択ダイアログによる登録（260727_1）: Cursor D&D 不能の確実な代替導線
+  ipcMain.handle("pick-projects", async (): Promise<RegisterResult[]> => {
+    if (win === null) return [];
+    const picked = await dialog.showOpenDialog(win, {
+      title: "登録するプロジェクトフォルダを選択",
+      properties: ["openDirectory", "multiSelections"],
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return [];
+    logger.info(`フォルダ選択登録: ${picked.filePaths.join(" | ")}`);
+    const results = picked.filePaths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
     broadcast();
     return results;
   });
@@ -563,11 +675,34 @@ function wireIpc(): void {
       project.clickTarget === "cursor"
         ? "立ち上げる（Cursor でこのフォルダを開く）"
         : "立ち上げる（ターミナルをこのフォルダで開く）";
+    // ステータスサブメニュー（260727_1）: config.customStatuses の選択肢＋「（なし）」で解除。
+    // 選択肢の追加・削除は設定画面から行う
+    const statuses = projectStore.config.customStatuses;
+    const statusItems: MenuItemConstructorOptions[] = [
+      ...statuses.map((s): MenuItemConstructorOptions => ({
+        label: s,
+        type: "radio",
+        checked: project.customStatus === s,
+        click: () => { setProjectStatus(id, s); },
+      })),
+      ...(statuses.length === 0
+        ? [{ label: "（設定画面でステータスを追加できます）", enabled: false } satisfies MenuItemConstructorOptions]
+        : []),
+      {
+        label: "（なし）",
+        type: "radio",
+        checked: project.customStatus === undefined,
+        click: () => { setProjectStatus(id, null); },
+      },
+    ];
     const menu = Menu.buildFromTemplate([
       { label: launchLabel, click: () => { launchProject(id); } },
       ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
+      { type: "separator" },
+      { label: "ステータス", submenu: statusItems },
+      { label: "表示名を変更…", click: () => { requestRename(id); } },
       { type: "separator" },
       { label: "登録解除（hooks も除去）…", click: () => { void confirmAndUnregister(id); } },
     ]);
@@ -576,6 +711,39 @@ function wireIpc(): void {
 
   ipcMain.handle("set-click-target", (_e, id: string, target: ClickTarget) => {
     projectStore.setClickTarget(id, target);
+    broadcast();
+  });
+
+  // 手動ステータス（260727_1）。割り当ては右クリックメニュー経由が主だが、API としても公開する
+  ipcMain.handle("set-project-status", (_e, id: string, status: string | null) => {
+    setProjectStatus(id, status);
+  });
+
+  ipcMain.handle("set-custom-statuses", (_e, list: string[]) => {
+    projectStore.setCustomStatuses(list);
+    broadcast();
+  });
+
+  // 表示名の変更（260903_2）: renderer の入力ダイアログから確定値を受ける。空はフォルダ名へ戻る
+  ipcMain.handle("set-project-name", (_e, id: string, name: string): OpResult => {
+    const project = projectStore.getProject(id);
+    if (project === null) return { ok: false, error: "プロジェクトが見つかりません" };
+    if (typeof name !== "string") return { ok: false, error: "表示名が不正です" };
+    const before = project.name;
+    const result = projectStore.renameProject(id, name);
+    if (!result.ok) return { ok: false, error: result.error };
+    if (result.name !== before) {
+      logger.info(`表示名変更: ${before} → ${result.name}`);
+      setStatus(`表示名を変更しました: ${before} → ${result.name}`);
+    } else {
+      broadcast();
+    }
+    return { ok: true };
+  });
+
+  // 未接続タイルの表示／非表示（260903_1）: ステータスバーのトグル。config.json に保持
+  ipcMain.handle("set-show-unlinked", (_e, value: boolean) => {
+    projectStore.setShowUnlinked(value === true);
     broadcast();
   });
 
@@ -694,7 +862,7 @@ void app.whenReady().then(async () => {
   projectStore.load();
 
   if (demoMode) {
-    seedDemo(projectStore, stateStore, demoCount);
+    windowPresence = seedDemo(projectStore, stateStore, demoCount); // 260903_1: 未接続タイルもシードで固定
     logger.info(`demo シード投入: ${demoCount} タイル`);
   } else {
     // 起動時追補（セルフヒール）: 登録済み全プロジェクトの hooks を冪等マージし、
@@ -740,6 +908,9 @@ void app.whenReady().then(async () => {
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
+    // 未接続タイル（260903_1）: 起動直後に 1 回判定し、以後は約 5 秒ごとに更新（変化時のみ配信）
+    pollWindowPresence();
+    windowPollTimer = setInterval(pollWindowPresence, WINDOW_POLL_INTERVAL_MS);
   }
 });
 
@@ -749,6 +920,7 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   if (livenessTimer !== null) clearInterval(livenessTimer);
+  if (windowPollTimer !== null) clearInterval(windowPollTimer);
   void devServers.stopAll(); // 開発サーバーを残さない（260722_1）
   void eventServer?.close();
   logger.info("terminal-app 終了");

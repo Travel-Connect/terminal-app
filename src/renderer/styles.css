@@ -163,13 +163,29 @@ body {
 .tile.state-confirm .tile-glow { background: var(--amber); animation: breath 2.4s ease-in-out infinite; }
 .tile.state-error .tile-glow   { background: var(--red); opacity: 0.75; animation: none; } /* 動かない赤 */
 
+.tile-head { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+
 .tile-name {
   font-weight: 600;
   font-size: 12.5px;
+  min-width: 0;
   max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 手動ステータスバッジ（260727_1）: 自動検知の状態表示と混ざらない控えめなピル */
+.tile-badge {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(128, 140, 160, 0.14);
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .tile-center { display: flex; align-items: center; gap: 6px; min-height: 20px; max-width: 100%; }
@@ -214,6 +230,26 @@ body {
 .tile.state-disconnected { opacity: 0.62; }
 .tile.state-disconnected .tile-work { color: var(--text-dim); }
 
+/* 未接続（260903_1）: 対象アプリ（Cursor / ターミナル）のウィンドウが無いタイルは彩度を落として沈める。
+   発光・アイコン色・作業テキストも消灯し「今は触れないタイル」であることを一目で伝える。
+   状態クラス（state-*）は残すので、非表示 → 表示に戻したときの状態表示はそのまま */
+.tile.is-unlinked { filter: grayscale(1); opacity: 0.5; }
+.tile.is-unlinked:hover { opacity: 0.78; }
+.tile.is-unlinked .tile-glow { animation: none; opacity: 0; }
+.tile.is-unlinked .tile-work,
+.tile.is-unlinked .tile-status,
+.tile.is-unlinked .tile-icon { color: var(--text-dim); }
+
+/* 全タイルが未接続で非表示のとき（260903_1）。未登録の空状態（面 1c）とは別の案内 */
+#all-hidden-note {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
 /* ---------------- 空状態（面 1c） ---------------- */
 
 #empty-state {
@@ -232,6 +268,13 @@ body {
 .empty-icon { font-size: 30px; margin-bottom: 12px; }
 .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
 .empty-sub { font-size: 12px; line-height: 1.6; }
+.btn-pick {
+  margin-top: 14px;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 7px 16px; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.btn-pick:hover { border-color: var(--text-dim); }
 
 /* ---------------- 設定（面 1d / 1f） ---------------- */
 
@@ -308,6 +351,11 @@ body {
 .toggle input:checked + .knob::after { transform: translateX(16px); }
 .toggle input:disabled + .knob { cursor: not-allowed; }
 
+/* 小型トグル（ステータスバー用。260903_1） */
+.toggle.small { width: 28px; height: 16px; }
+.toggle.small .knob::after { width: 12px; height: 12px; }
+.toggle.small input:checked + .knob::after { transform: translateX(12px); }
+
 /* プロジェクト行 */
 .project-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -331,6 +379,15 @@ body {
 }
 .btn-remove:hover { background: rgba(217, 66, 78, 0.15); color: var(--red); }
 
+/* 表示名の変更（260903_2）: 設定画面の行末アイコン。登録解除（赤）と区別してアクセント色 */
+.btn-edit {
+  width: 24px; height: 24px;
+  border: none; border-radius: 6px;
+  background: transparent; color: var(--text-dim);
+  font-size: 13px; cursor: pointer; line-height: 1;
+}
+.btn-edit:hover { background: rgba(96, 165, 250, 0.14); color: var(--accent); }
+
 .btn-more {
   width: 100%;
   background: transparent; color: var(--text-dim);
@@ -338,6 +395,34 @@ body {
   padding: 8px; font: inherit; font-size: 12px; cursor: pointer;
 }
 .btn-more:hover { color: var(--text); }
+
+/* 手動ステータスの選択肢管理（260727_1 / 設定画面） */
+.status-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.status-row .status-name { font-weight: 600; font-size: 12.5px; }
+.status-row .status-usage { font-size: 11px; color: var(--text-dim); }
+
+.status-add { display: flex; gap: 8px; margin-bottom: 8px; }
+.status-add input {
+  flex: 1; min-width: 0;
+  padding: 6px 10px;
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; font-size: 12px;
+}
+.status-add input:focus { outline: 1px solid var(--accent); }
+.status-add button {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 14px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.status-add button:hover { color: var(--text); background: rgba(128, 140, 160, 0.12); }
 
 /* ---------------- ステータスバー ---------------- */
 
@@ -352,7 +437,16 @@ body {
   flex: none;
   font-variant-numeric: tabular-nums;
 }
-#status-message { color: var(--amber); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#status-message { color: var(--amber); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; text-align: right; }
+
+/* ステータスバー右端の表示／非表示トグル（260903_1） */
+.sb-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  flex: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-toggle:hover { color: var(--text); }
 
 /* ---------------- D&D オーバーレイ ---------------- */
 
@@ -371,3 +465,41 @@ body {
   color: var(--text);
   font-weight: 600;
 }
+
+/* ---------------- 表示名の変更ダイアログ（260903_2） ---------------- */
+
+#rename-dialog {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60;
+}
+.dialog-card {
+  width: min(360px, calc(100vw - 40px));
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.dialog-title { font-weight: 600; font-size: 13.5px; }
+.dialog-desc { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+#rename-input {
+  padding: 7px 10px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; font-size: 13px;
+  user-select: text; /* body は user-select: none のため入力欄だけ選択可にする */
+}
+#rename-input:focus { outline: 1px solid var(--accent); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.btn-secondary, .btn-primary {
+  padding: 6px 14px; border-radius: 8px;
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.btn-secondary { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+.btn-secondary:hover { color: var(--text); background: rgba(128, 140, 160, 0.12); }
+.btn-primary { background: var(--accent); color: #fff; border: 1px solid transparent; }
+.btn-primary:hover { filter: brightness(1.08); }

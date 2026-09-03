@@ -49,7 +49,7 @@
 <main>
   <header>
     <h1>質問ダッシュボード</h1>
-    <div class="meta">作成日時: 2026-07-12 01:10 / 対象作業: terminal-app 修正依頼（260712_2修正依頼.md — 切断検知・切断表示・再接続・右クリックメニュー・機能提案）/
+    <div class="meta">作成日時: 2026-07-20 / 対象作業: タイル右クリックから開発サーバー起動＋ブラウザで開く機能（CP932 対応・E2E テスト含む） /
       判定: <span class="status warn">B: 実装前に質問</span></div>
   </header>
 
@@ -57,12 +57,12 @@
     <h2>0. 3秒サマリー</h2>
     <div class="summary-list">
       <div class="summary-item"><strong>何の作業か</strong>
-        <p>セッションが切断（アプリに終了の合図が届かないまま消えること）されたときの通知と表示、リセット後の再接続、プロジェクトタイルの右クリックメニュー（再接続・削除）の追加。あわせて便利機能の提案を HTML でまとめる。</p></div>
+        <p>タイルの右クリックメニューに「開発サーバー（ローカルで動く確認用サーバー）を起動してブラウザで開く」を追加します。日本語が CP932（Windows の文字コード）で出力されても文字化けしない読み取りと、自動テストまで含みます。</p></div>
       <div class="summary-item"><strong>なぜ質問しているか</strong>
         <span class="status warn">回答待ち</span>
-        <p>「切断」の判定方法と「削除」の意味を取り違えると、検知ロジックとメニューの作り直し（出戻り）になるためです。</p></div>
+        <p>起動コマンド・開く URL・停止方法・テストの深さの 4 点は作りが大きく変わる分岐で、ここを誤ると作り直し（出戻り）になるためです。</p></div>
       <div class="summary-item"><strong>質問の数</strong>
-        <span class="status bad">全 6 問（うち回答必須 5 問）</span>
+        <span class="status bad">全 4 問（うち回答必須 4 問）</span>
         <p>回答必須（[BLOCKING]）の質問に答えてもらえれば次に進めます。</p></div>
     </div>
   </section>
@@ -75,63 +75,43 @@
       <tr><th>No.</th><th>テーマ</th><th>優先度</th><th>種別</th><th>質問</th><th>選択肢</th><th>推奨案と理由</th><th>根拠</th></tr>
       <tr>
         <td>1</td>
-        <td>切断の定義・検知方法</td>
+        <td>起動コマンド</td>
         <td class="priority-high">高</td>
         <td><span class="status bad">[BLOCKING] 回答必須</span></td>
-        <td>何をもって「切断」と判定しますか？</td>
-        <td>A. transcript（Claude Code の会話記録ファイル）の更新停止＋ウィンドウ消失の併用<br>B. transcript の更新停止のみ<br>C. ウィンドウ消失のみ<br>D. hook イベントの途絶時間で判定</td>
-        <td>A を推奨。実行中は hook イベントが来ないのが正常のため D は誤検知が多い。transcript は応答生成中に更新され続けるので確実性が高く、ウィンドウ消失（既存機能の流用）を補助にすると精度が上がる。</td>
-        <td>src/main/state-store.ts:58（transcript_path 保持）、src/main/window-control.ts:199（「ウィンドウが見つかりません」既存）</td>
+        <td>各プロジェクトの開発サーバーを起動するコマンドをどう決めますか？</td>
+        <td>A. 自動検出（package.json の scripts から dev → start → serve の順で探す。無いタイルはメニューを無効表示）<br>B. プロジェクトごとに設定画面で指定できるようにする（既定は A の自動検出）<br>C. 全プロジェクト固定で npm run dev</td>
+        <td>A を推奨。登録済みプロジェクトの大半は npm 系 Web アプリで、設定の手間なく使え、対象外（Python 等）は無効表示で誤操作も防げるため。</td>
+        <td>登録タイル例: zaico-kanri-app / product-register / ECimagecreate-app（npm 系）と pad-python（npm 以外）</td>
       </tr>
       <tr>
         <td>2</td>
-        <td>お知らせの形</td>
+        <td>開く URL</td>
         <td class="priority-high">高</td>
         <td><span class="status bad">[BLOCKING] 回答必須</span></td>
-        <td>切断を検知したとき、タイルの切断表示に加えてどんな「お知らせ」を出しますか？</td>
-        <td>A. Windows トースト通知（画面右下に出る OS の通知）も出す<br>B. アプリ内のみ（タイル表示＋ステータスバー）<br>C. その他</td>
-        <td>A を推奨。アプリを最小化していても気づけるのが「お知らせが欲しい」の意図に合うため。</td>
-        <td>依頼文「切断されたら切断されたってお知らせが欲しい」。通知音は既存仕様で無効固定（src/renderer/renderer.ts:191 REQ-12/AC-18）のため音は対象外と仮定</td>
+        <td>ブラウザで開く URL（ポート番号）をどう決めますか？</td>
+        <td>A. サーバーの出力から自動検出（起動ログの「http://localhost:ポート番号」を読み取って開く。CP932 でも文字化けせず読める形で）<br>B. フレームワークの既定値を推測（Next.js=3000 / Vite=5173 など）<br>C. プロジェクトごとに設定画面で指定</td>
+        <td>A を推奨。実際に空いたポートで起動した URL を開くため確実（3000 が使用中で 3001 に変わるケースにも追従できる）。検出できないときだけ B の既定値に落とす。</td>
+        <td>Next.js / Vite は起動ログに「Local: http://localhost:xxxx」を必ず出力する</td>
       </tr>
       <tr>
         <td>3</td>
-        <td>再接続の期待動作</td>
-        <td class="priority-high">高</td>
+        <td>停止・状態管理</td>
+        <td class="priority-mid">中</td>
         <td><span class="status bad">[BLOCKING] 回答必須</span></td>
-        <td>リセット（アプリ再起動）後の再接続は、どの動作を期待しますか？　※技術的には難しくありません（transcript の走査で復元可能）</td>
-        <td>A. 右クリックの手動「再接続」で拾い直す<br>B. アプリ起動時の自動復元＋手動「再接続」の両方<br>C. 次の hook イベントでの自然復帰で十分</td>
-        <td>A を推奨。依頼の右クリックメニューと直結し、終了済みセッションを誤って「実行中」に復活させるリスクを操作者が制御できるため。B は自動復元の誤検知対策とセットで実装可能。</td>
-        <td>セッションは揮発設計（src/main/state-store.ts:292 resetAll「再起動で全タイル待機」）。画像 20260712005833 の「0 セッション」状態と一致</td>
+        <td>起動した開発サーバーの停止と状態表示はどこまで作りますか？</td>
+        <td>A. メニューに「サーバー停止」を追加＋terminal-app 終了時に自動停止＋起動中はメニュー表示を切り替え<br>B. 起動のみ（停止は手動。タスクマネージャーやターミナルで）</td>
+        <td>A を推奨。起動だけだとサーバーが残り続け、次回起動時のポート衝突や電池・メモリの無駄につながるため。</td>
+        <td>terminal-app は常駐アプリのため、起動したまま忘れるリスクが高い</td>
       </tr>
       <tr>
         <td>4</td>
-        <td>右クリック「削除」の意味</td>
-        <td class="priority-high">高</td>
-        <td><span class="status bad">[BLOCKING] 回答必須</span></td>
-        <td>右クリックメニューの「削除」は何を消しますか？</td>
-        <td>A. プロジェクトの登録解除（hooks も除去。設定画面の既存機能と同じ）<br>B. タイルの表示クリアのみ（登録は維持）<br>C. 「登録解除」と「表示クリア」の 2 項目に分ける</td>
-        <td>A を推奨。既存の登録解除（設定画面）への導線追加なので挙動が既知で安全。切断セッションの掃除も欲しい場合は C。</td>
-        <td>src/renderer/renderer.ts:246-253（既存の登録解除 UI）、src/shared/types.d.ts:94（unregisterProject API）</td>
-      </tr>
-      <tr>
-        <td>5</td>
-        <td>進め方</td>
+        <td>E2E テストの範囲</td>
         <td class="priority-mid">中</td>
         <td><span class="status bad">[BLOCKING] 回答必須</span></td>
-        <td>実装は前回と同じ run-eval-loop（自動採点つき品質ループ）で回しますか？</td>
-        <td>A. 前回同様 run-eval-loop で回す（threshold 90 / max 4・HTML 進捗報告つき）<br>B. ループなしで直接実装する</td>
-        <td>A を推奨。前回と同じ運用で採点による品質担保と HTML 報告が揃うため。</td>
-        <td>前回依頼（260712.md）は run-eval-loop で完走（score 99/100）</td>
-      </tr>
-      <tr>
-        <td>6</td>
-        <td>機能提案のまとめ先</td>
-        <td class="priority-low">低</td>
-        <td><span class="status warn">[ASSUMPTION] 仮定可</span></td>
-        <td>「あったら便利な機能」の HTML はどこにまとめますか？</td>
-        <td>A. Artifact（ブラウザで見られる共有リンク。前回の進捗報告と同じ形式）<br>B. リポジトリ内にファイル保存（docs/ 配下）<br>C. 両方</td>
-        <td>A を推奨。前回「HTML で報告」を Artifact で運用した実績があり、閲覧・共有が容易なため。無回答なら A で進めます。</td>
-        <td>依頼文「HTMLでまとめてください」。前回の進捗報告は Artifact で公開済み</td>
+        <td>「E2E テストまで」の範囲はどこまでを想定していますか？</td>
+        <td>A. 統合テスト＋実機確認（実プロセスを起動する自動テストで CP932 出力の読み取り・URL 検出・停止まで検証し、仕上げに実アプリで動作確認）<br>B. A に加えて Playwright（ブラウザ・アプリ自動操作ツール）を導入し、Electron アプリ本体の起動テストも追加<br>C. 単体テストのみ（出力の解読・URL 検出のロジックだけ）</td>
+        <td>A を推奨。右クリックメニュー自体は OS のネイティブメニューのため Playwright でも自動操作できず、B は導入コストの割に増える検証が少ない。A なら「実サーバー起動→CP932 ログ読み取り→URL 検出→停止」の本質部分を毎回自動で検証できる。</td>
+        <td>メニューは Electron の Menu.popup（ネイティブ UI）で実装済み: src/main/index.ts の show-tile-menu</td>
       </tr>
     </table></div>
   </section>
@@ -141,21 +121,15 @@
     <p class="muted">回答が無い場合にこのまま採用する前提です。違っていたらチャットで指摘してください。</p>
     <div class="table-wrap"><table>
       <tr><th>タグ</th><th>内容</th><th>根拠・そう仮定する理由</th></tr>
-      <tr><td><span class="status ok">確定</span></td>
-        <td>タイルに「切断」状態の表示を追加する（切断された旨がわかるステータス）</td>
-        <td>依頼文 2 節「切断されたステータスは、切断された旨がわかるようにしてほしい」より</td></tr>
-      <tr><td><span class="status ok">確定</span></td>
-        <td>右クリックメニューの対象はプロジェクトのタイル。「再接続」「削除」の 2 項目を含む</td>
-        <td>依頼文 4 節と画像 20260712005833（タイル 4 枚の画面）より</td></tr>
       <tr><td><span class="status warn">[ASSUMPTION]</span></td>
-        <td>「WebUI をリセット」＝アプリの再起動を指す（セッション表示が全て「待機・イベント待ち／0 セッション」に戻った状態）</td>
-        <td>UI にリセットボタンは存在せず、再起動で全タイル待機になる揮発設計（state-store.ts:292）が画像 20260712005833 と一致するため</td></tr>
+        <td>「このアプリ」= タイルに登録された各プロジェクトのこと（terminal-app 自体をブラウザで動かす話ではない）</td>
+        <td>terminal-app 本体は Electron 専用（ブラウザ単体では動かない作り）のため。既存の「立ち上げる」もタイルのプロジェクトが対象</td></tr>
       <tr><td><span class="status warn">[ASSUMPTION]</span></td>
-        <td>「あったら便利な機能」は提案のみで、今回は実装しない</td>
-        <td>依頼文が「考えてみて。HTMLでまとめてください」であり実装指示ではないため</td></tr>
+        <td>CP932 対応の適用先 = 起動した開発サーバーの出力の読み取り（URL 検出・ログ・エラー表示で文字化けさせない）。UTF-8 と CP932 を自動判別する</td>
+        <td>Windows で npm を起動すると日本語出力が CP932 になることがあり、実際にこの開発中も文字化けが発生した実績がある</td></tr>
       <tr><td><span class="status warn">[ASSUMPTION]</span></td>
-        <td>通知音は追加しない（既存仕様どおり無効固定を維持）</td>
-        <td>REQ-12 / AC-18 で通知音は MVP では常に OFF・無効（renderer.ts:191）。変更が小さく元に戻しやすい安全側のため</td></tr>
+        <td>ブラウザは Windows の既定ブラウザで開く（Chrome 固定にしない）</td>
+        <td>OS の標準動作に合わせるのが最も安全で、既定ブラウザが Chrome なら結果は同じため</td></tr>
     </table></div>
   </section>
 

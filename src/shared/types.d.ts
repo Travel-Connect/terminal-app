@@ -23,6 +23,11 @@ export interface Project {
   path: string;
   clickTarget: ClickTarget;
   registeredAt: string;
+  /**
+   * 手動ステータス（260727_1）。自動検知の SessionState とは別レイヤーのユーザー付与ラベル。
+   * config.customStatuses の中から右クリックメニューで選択する。未設定 = ラベルなし
+   */
+  customStatus?: string;
 }
 
 /** config.json（design.md 9 章） */
@@ -33,6 +38,13 @@ export interface AppConfig {
   alwaysOnTopDefault: boolean;
   /** REQ-12（次期）用の予約キー。MVP では常に false・UI から変更不可 */
   notifySound: { enabled: boolean };
+  /** 手動ステータスの選択肢（260727_1）。設定画面で自由に追加・削除できる */
+  customStatuses: string[];
+  /**
+   * 未接続タイル（260903_1: 対象アプリのウィンドウが無いタイル）を表示するか。
+   * false = 灰色タイルをグリッドから隠す。ステータスバーのトグルで切り替え、再起動後も保持
+   */
+  showUnlinked: boolean;
 }
 
 /** セッション状態（メモリのみ・揮発。design.md 9 章） */
@@ -82,6 +94,12 @@ export interface Snapshot {
   config: AppConfig;
   pinned: boolean;
   statusMessage: string;
+  /**
+   * ウィンドウ有無（260903_1）。key = projectId、value = クリックで開く対象アプリ（Cursor / ターミナル）の
+   * ウィンドウが見つかったか。main が約 5 秒ごとに判定する。キーが無い = 判定不能（koffi 未ロード等）で、
+   * renderer は「接続あり」扱いにする（安全側）。未接続の最終判定は renderer の isUnlinked（format.ts）
+   */
+  windowPresence: Record<string, boolean>;
 }
 
 export interface RegisterResult {
@@ -89,6 +107,21 @@ export interface RegisterResult {
   path: string;
   projectId?: string;
   error?: string;
+}
+
+/**
+ * D&D ドロップの生ペイロード（260727_1）。
+ * Cursor（VS Code 系）からのドラッグは OS の File が付かないため、
+ * renderer は DataTransfer の中身を丸ごと main へ渡し、main 側で
+ * パス抽出（drop-paths.ts）と診断ログ出力を行う。
+ */
+export interface DropPayload {
+  /** webUtils.getPathForFile で解決できた実ファイルパス（エクスプローラからのドロップ） */
+  filePaths: string[];
+  /** dataTransfer.types の一覧（診断ログ用） */
+  types: string[];
+  /** type → getData(type) の値（先頭 8000 文字。フォールバック抽出＋診断ログ用） */
+  data: Record<string, string>;
 }
 
 export interface OpResult {
@@ -105,8 +138,25 @@ export interface FocusResult {
 export interface TerminalAppApi {
   getSnapshot(): Promise<Snapshot>;
   registerProjects(paths: string[]): Promise<RegisterResult[]>;
+  /** D&D ドロップの生ペイロードを渡して登録する（260727_1: パス抽出は main 側で行う） */
+  registerDrop(payload: DropPayload): Promise<RegisterResult[]>;
+  /**
+   * フォルダ選択ダイアログでプロジェクトを登録する（260727_1）。
+   * Cursor のツリーからの D&D は OS ドラッグにパス情報が載らず対応不能のため、確実な代替導線
+   */
+  pickProjects(): Promise<RegisterResult[]>;
+  /** D&D 診断ログを main のログファイルへ送る（260727_1。renderer コンソールは非表示運用のため） */
+  dndLog(msg: string): void;
   unregisterProject(id: string): Promise<OpResult>;
   setClickTarget(id: string, target: ClickTarget): Promise<void>;
+  /** 手動ステータスの割り当て（260727_1）。null = 解除 */
+  setProjectStatus(id: string, status: string | null): Promise<void>;
+  /** 手動ステータスの選択肢一覧を丸ごと更新（260727_1）。追加・削除とも本 API に集約 */
+  setCustomStatuses(list: string[]): Promise<void>;
+  /** 表示名の変更（260903_2）。空はフォルダ名へ戻す。上限超過などは ok=false + error */
+  setProjectName(id: string, name: string): Promise<OpResult>;
+  /** 未接続タイルの表示／非表示（260903_1）。config.json に保持 */
+  setShowUnlinked(value: boolean): Promise<void>;
   setTheme(theme: ThemeSetting): Promise<void>;
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
@@ -118,6 +168,8 @@ export interface TerminalAppApi {
   /** NFR-01 計測用: スナップショット描画完了を main へ通知（受信→描画のログ差分計測） */
   notifyRendered(revision: number): void;
   onSnapshot(cb: (snap: Snapshot) => void): void;
+  /** タイル右クリック →「表示名を変更…」で main から届く。renderer 側で入力ダイアログを開く（260903_2） */
+  onRenameRequest(cb: (projectId: string) => void): void;
   /** Electron 32+ で File.path が廃止されたため webUtils 経由でパスを得る */
   getPathForFile(file: File): string;
 }

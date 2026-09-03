@@ -34,6 +34,12 @@ npm start
 - 自アプリ分の hooks は command 内の URL パス `/terminal-app/event` で識別する（`terminal-app` を
   パスに含むだけのユーザー自身の hook は除去・置換の対象にならない）。
 - タイルをクリックすると、そのプロジェクトに設定した対象（Cursor / ターミナル）を前面化する。
+- **未接続タイル**: クリックで開く対象アプリ（Cursor / ターミナル）でそのフォルダを開いているウィンドウが
+  見つからないタイルは灰色で表示される（約 5 秒ごとに判定。実行中・確認待ちのタイルは誤判定で隠さないよう対象外）。
+  ステータスバー右端の「未接続を表示」トグルで非表示にでき、設定は再起動後も保持される。
+  右クリック →「立ち上げる」で対象アプリを開くと数秒で通常表示に戻る。
+- **表示名**: タイル右クリック →「表示名を変更…」または設定画面の ✎ で、フォルダ名とは別の表示名を付けられる
+  （空にするとフォルダ名へ戻る。前面化・切断検知の対象探索はフォルダ名のまま）。
 - 登録解除は設定画面（歯車アイコン）の各プロジェクト行の × ボタン。自アプリ分の hooks のみ除去する。
 - トースト通知・サウンドは次期スコープ（REQ-12）。設定 UI は無効表示のみで音は鳴らない。
 
@@ -49,6 +55,7 @@ npm start
 | `node scripts/verify-upgrade.mjs <出力先>` | 旧 2 イベント構成サンドボックスへの起動時追補（before/after）と UserPromptSubmit 注入→実行中表示を実測し証跡を残す（実 %APPDATA%・実プロジェクトに非接触） |
 | `node scripts/verify-real-session.mjs <出力先>` | 実 `claude -p` セッション＋マージ済み実 hook コマンドで、hooks 整備→実行中→完了→再起動保持→未起動時の無害性を通しで実測し証跡を残す（専用ポートで実稼働アプリと共存） |
 | `node scripts/verify-foreground.mjs <出力先>` | 実ターミナルウィンドウを開き、前面化（V-09 #8）と最小化からの復元＋前面化（#9）を GetForegroundWindow / IsIconic で実測する（実行中は一瞬フォーカスが移る） |
+| `node scripts/verify-unlinked-rename-e2e.mjs [出力先]` | デモ起動を CDP（remote-debugging）で操作し、未接続タイルの灰色表示・トグル非表示・config 保持と、表示名の変更ダイアログ（保存／上限拒否／空でフォルダ名復帰）を実 IPC 往復で確認し、スクリーンショットを残す |
 
 検証・証跡用の起動フラグ（`npx electron . <flags>`）:
 
@@ -81,6 +88,7 @@ scripts/               … build 補助・スモーク・注入検証
 - 設定・登録情報: `%APPDATA%\terminal-app\`（`projects.json` / `config.json`）
 - ログ: `%APPDATA%\terminal-app\logs\app.log`（日次ローテーション・7 日保持）
 - 環境変数 `TERMINAL_APP_DATA_DIR` でデータディレクトリを差し替え可能（テスト・デモ用）
+- 環境変数 `TERMINAL_APP_WINDOW_POLL_MS` で未接続タイル判定（ウィンドウ列挙）の間隔を変更可能（既定 5000ms。検証用）
 
 ## 既知の制約（MVP）
 

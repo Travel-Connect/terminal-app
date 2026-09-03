@@ -3,7 +3,7 @@
  * 対応設計: design.md 5.1（経過時間・相対時刻の表示規則）／6.1（ステータスバーの 0 件省略）。
  * 前ループ evaluator 指摘（renderer 表示純関数のテスト未カバー）への対応として分離した。
  */
-import type { StatusCounts } from "../shared/types";
+import type { SessionState, StatusCounts } from "../shared/types";
 
 /** 実行中の経過時間 h:mm:ss（モック 1a: 1:24:01。design.md 5.1 / 6.2） */
 export function fmtElapsed(ms: number): string {
@@ -39,4 +39,21 @@ export function fmtStatusCounts(counts: StatusCounts): string {
   if (counts.error > 0) parts.push(`${counts.error}エラー`);
   if ((counts.disconnected ?? 0) > 0) parts.push(`${counts.disconnected}切断`); // 260712_2（オプショナル: 旧呼び出しは 0 扱い）
   return parts.length > 0 ? `${parts.join(" ")} / ${counts.total}セッション` : `${counts.total} セッション`;
+}
+
+/**
+ * 未接続タイルの判定（260903_1）。
+ * present = main が 5 秒ごとに判定した「クリックで開く対象アプリ（Cursor / ターミナル）のウィンドウが
+ * 見つかったか」（Snapshot.windowPresence）。undefined = 判定不能（koffi 未ロード・初回判定前）。
+ * 規則: ウィンドウが無く、かつ実行中・確認待ちでもないタイルだけを未接続にする —
+ * タイトル一致の偽陰性（タブ切替でタイトルが変わる等）で作業中のタイルを灰色化・非表示にしないため。
+ */
+export function isUnlinked(present: boolean | undefined, state: SessionState | undefined): boolean {
+  if (present !== false) return false;
+  return state !== "running" && state !== "confirm";
+}
+
+/** ステータスバーの表示／非表示トグルのラベル（260903_1）。件数は現在の未接続タイル数 */
+export function fmtUnlinkedLabel(count: number): string {
+  return `未接続を表示（${count}）`;
 }

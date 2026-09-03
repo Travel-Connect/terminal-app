@@ -18,6 +18,16 @@ export interface AddProjectResult {
   error?: string;
 }
 
+/** 表示名の上限文字数（260903_2）。タイル幅（128px〜）で省略が過剰にならない程度 */
+export const PROJECT_NAME_MAX = 40;
+
+export interface RenameResult {
+  ok: boolean;
+  /** 確定した表示名（空入力時はフォルダ名に戻る） */
+  name?: string;
+  error?: string;
+}
+
 /**
  * 登録対象ディレクトリの検証（design.md 3.2(a) パス検証）。
  * 実在ディレクトリであること・重複登録でないことを確認する。
@@ -51,6 +61,8 @@ function defaultConfig(): AppConfig {
     theme: "auto",
     alwaysOnTopDefault: false,
     notifySound: { enabled: false }, // REQ-12 予約キー。MVP では常に false
+    customStatuses: ["作業中", "レビュー待ち", "保留"], // 手動ステータスの初期選択肢（260727_1）
+    showUnlinked: true, // 未接続タイル（260903_1）は既定で表示（従来どおりの見え方。灰色化のみ）
   };
 }
 
@@ -103,6 +115,14 @@ export class ProjectStore {
     }
     // MVP では通知音は常に無効（REQ-12 / spec.md AC-18。UI からも変更不可）
     this._config.notifySound = { enabled: false };
+    // 旧バージョンの config.json（customStatuses 欠落）や壊れた値は既定の選択肢で補完（260727_1）
+    if (!Array.isArray(this._config.customStatuses) || this._config.customStatuses.some((s) => typeof s !== "string")) {
+      this._config.customStatuses = defaultConfig().customStatuses;
+    }
+    // 旧 config.json（showUnlinked 欠落）や壊れた値は「表示」に倒す（260903_1。タイルが黙って消えない側）
+    if (typeof this._config.showUnlinked !== "boolean") {
+      this._config.showUnlinked = true;
+    }
   }
 
   /**
@@ -152,6 +172,36 @@ export class ProjectStore {
     return true;
   }
 
+  /** 手動ステータスの割り当て（260727_1）。null で解除。選択肢に無い値は拒否する */
+  setCustomStatus(id: string, status: string | null): boolean {
+    const p = this._projects.find((x) => x.id === id);
+    if (!p) return false;
+    if (status !== null && !this._config.customStatuses.includes(status)) return false;
+    if (status === null) delete p.customStatus;
+    else p.customStatus = status;
+    this.saveProjects();
+    return true;
+  }
+
+  /**
+   * 手動ステータスの選択肢を丸ごと更新（260727_1）。空白のみ・重複は除去する。
+   * 選択肢から消えたステータスは、使用中プロジェクトからも解除する
+   * （メニューで再選択できないラベルをタイルに残さない）。
+   */
+  setCustomStatuses(list: string[]): void {
+    const cleaned = [...new Set(list.map((s) => s.trim()).filter((s) => s !== ""))];
+    this._config.customStatuses = cleaned;
+    let projectsChanged = false;
+    for (const p of this._projects) {
+      if (p.customStatus !== undefined && !cleaned.includes(p.customStatus)) {
+        delete p.customStatus;
+        projectsChanged = true;
+      }
+    }
+    this.saveConfig();
+    if (projectsChanged) this.saveProjects();
+  }
+
   setTheme(theme: ThemeSetting): void {
     this._config.theme = theme;
     this.saveConfig();
@@ -160,6 +210,28 @@ export class ProjectStore {
   setAlwaysOnTopDefault(value: boolean): void {
     this._config.alwaysOnTopDefault = value;
     this.saveConfig();
+  }
+
+  /** 未接続タイルの表示／非表示（260903_1）。ステータスバーのトグルから呼ばれ、再起動後も保持する */
+  setShowUnlinked(value: boolean): void {
+    this._config.showUnlinked = value;
+    this.saveConfig();
+  }
+
+  /**
+   * 表示名の変更（260903_2）。前後の空白を除き、空ならフォルダ名（path の basename）へ戻す。
+   * path は変えないため、前面化・切断検知・cwd 対応付け（いずれも path 基準）には影響しない。
+   */
+  renameProject(id: string, name: string): RenameResult {
+    const p = this._projects.find((x) => x.id === id);
+    if (!p) return { ok: false, error: "プロジェクトが見つかりません" };
+    const trimmed = name.trim();
+    if (trimmed.length > PROJECT_NAME_MAX) {
+      return { ok: false, error: `表示名は ${PROJECT_NAME_MAX} 文字以内にしてください` };
+    }
+    p.name = trimmed === "" ? path.basename(p.path) : trimmed;
+    this.saveProjects();
+    return { ok: true, name: p.name };
   }
 
   private newId(): string {
