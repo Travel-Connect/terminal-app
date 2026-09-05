@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>terminal-app 260904_1（バッジ配置・確認待ちの青点滅と自動復帰・分割タイル・ウィンドウ位置の記憶） — 作業完了ダッシュボード</title>
-<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-04T06:21:30+0900","subject":"terminal-app 260904_1（バッジ配置・確認待ちの青点滅と自動復帰・分割タイル・ウィンドウ位置の記憶）","state":"要確認","score":85,"open_tasks":3,"blockers":0} -->
+<title>terminal-app 260906_1（整列ボタン・D&amp;D 並べ替え・自動整列） — 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-06T06:13:05+0900","subject":"terminal-app 260906_1（整列ボタン・D&D 並べ替え・自動整列）","state":"要確認","score":88,"open_tasks":3,"blockers":0} -->
 <style>
   :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
           --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
@@ -69,20 +69,20 @@
 <main>
   <header>
     <h1>作業完了ダッシュボード</h1>
-    <div class="meta">作成日時: 2026-09-04 06:21 / 対象: terminal-app 260904_1（バッジ配置・確認待ちの青点滅と自動復帰・分割タイル・ウィンドウ位置の記憶） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
-      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 3837d29</div>
+    <div class="meta">作成日時: 2026-09-06 06:13 / 対象: terminal-app 260906_1（整列ボタン・D&amp;D 並べ替え・自動整列） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 99bfc81（今回の変更は未コミット）</div>
   </header>
 
   <section class="card" id="sec-0">
     <h2>0. 3秒サマリー</h2>
     <div class="summary-list">
       <div class="summary-item"><strong>結論</strong>
-        <span class="status warn">要確認</span><p>画面メモ #1〜#3 の 4 件をすべて実装し、稼働中のアプリに反映済み（06:17 に再起動）。自動テスト 375 件と実画面の E2E テスト（実際の画面操作をなぞる動作確認）2 本が通りました。「立ち上げる」後にウィンドウが記憶位置へ自動で戻る流れだけ、実際の Cursor 起動での確認が残っています。</p></div>
+        <span class="status warn">要確認</span><p>整列ボタン（#1）・タイルのドラッグ&amp;ドロップ並べ替え（#2）・自動整列（接続中を左上へ）の3点を実装し、自動テストと画面操作の自動確認（E2Eテスト）をすべて通しました。稼働中のアプリも再起動して反映済みです。解釈が分かれる2点を仮定で進めたので、実際に触って確認してください。</p></div>
       <div class="summary-item"><strong>あなたの対応</strong>
-        <span class="status warn">後でよい</span>
-        <p>稼働中のアプリで見え方（バッジの位置・確認待ちの青い点滅）を確かめ、ウィンドウ位置の「記憶 → 立ち上げる」を 1 回試してください（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
+        <span class="status bad">必要</span>
+        <p>再起動済みの terminal-app で右上の整列ボタン（フォルダ追加ボタンの右隣）を押し、接続中のタイルが左上に来るか確認してください（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
       <div class="summary-item"><strong>作業を止めている問題（ブロッカー）</strong>
-        <span class="status ok">該当なし</span><p>作業を止める問題はありません。</p></div>
+        <span class="status ok">該当なし</span><p>失敗した検証はありません。変更の保存記録（commit）だけ指示待ちで未実施です。</p></div>
     </div>
   </section>
 
@@ -92,15 +92,15 @@
       <div class="card span-3"><h3>完了状態</h3>
         <p><span class="status warn">要確認</span></p></div>
       <div class="card span-3"><h3>報告の確かさ</h3>
-        <p><span class="status ok">高</span></p><p class="muted">自動テスト・E2E・実際の claude セッション登録簿を使ったライブ検証・Win32 API の実機呼び出しまで、結果を目で確認して書いています。</p></div>
+        <p><span class="status ok">高</span></p><p class="muted">単体テスト394件・型チェック・Lint・ビルド・E2Eテスト（20項目）をすべて実行して結果を確認済み。実アプリでの人の手によるマウス操作だけ未実施</p></div>
       <div class="card span-3"><h3>自己採点</h3>
-        <div class="score">85<small>/100</small></div></div>
+        <div class="score">88<small>/100</small></div></div>
       <div class="card span-3"><h3>情報の新しさ</h3>
-        <p>報告作成 2026-09-04 06:21。稼働アプリ再起動 06:17、ライブ検証 06:20、テスト実行 06:21。</p></div>
+        <p>作成 2026-09-06 06:13。E2Eテスト最終実行 06:11、稼働アプリ再起動 06:12（起動ログ確認済み）</p></div>
       <div class="card span-12"><h3>画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
-        <p><span class="status info">対象外（画面の変更なし）</span>
-           terminal-app は Web アプリではなくデスクトップアプリ（Electron）のため、起動サーバーはありません。画面の変更は稼働中のアプリ本体（06:17 に新ビルドで再起動済み）でそのまま確認できます。</p>
-        <p>確認する画面: 今回は画面の変更がないため起動していません（デスクトップアプリのため）。見え方の見本は「11. 検証・実施ログ」のスクリーンショットを参照。</p>
+        <p><span class="status info">対象外（デスクトップアプリのため確認用サーバーなし）</span>
+           terminal-app は Electron（Web技術で作るデスクトップアプリ）なので、ブラウザで開く確認用サーバーはありません。代わりに稼働中のアプリを再起動して新しいビルドを反映済みです（新プロセス 06:12:18 起動、起動ログにエラーなし）。</p>
+        <p>確認する画面: 画面右上の整列ボタンとタイルのドラッグは、起動中の terminal-app の画面で直接確認してください。自動確認時の画面は「11. 検証・実施ログ」のスクリーンショットにあります。</p>
         </div>
     </div>
   </section>
@@ -114,16 +114,16 @@
       <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / 返信）</th></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
         <td><span class="status bad">今すぐ・目で確認</span></td>
-        <td>稼働中の terminal-app で、バッジ（作業中／レビュー待ち）が名前の下の行にあること、確認待ちのタイルが青く点滅していることを見る（今は商品登録アプリが確認待ちのはず）</td>
-        <td>見本のスクリーンショット: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-split-blink/01-main-split-blink-badge.png">01-main-split-blink-badge.png</a>（デモ画面）</td></tr>
+        <td>再起動済みの terminal-app で右上の整列ボタン（フォルダ追加ボタンの右隣）を押し、接続中のタイルが左上に来るか確認する</td>
+        <td>確認後にチャットへ返信: <strong>OK</strong> = 期待どおり / <strong>NG</strong> = 違う点を一言（例「NG 待機中のタイルも前に来てほしい」）</td></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
-        <td><span class="status warn">返信で選ぶ</span></td>
-        <td>ウィンドウ位置の「記憶 → 立ち上げる → 自動で戻る」を実際の Cursor で 1 回試す（AI はこの流れだけ実機で未確認）</td>
-        <td><strong>A</strong> = 自分で試す: タイル右クリック →「ウィンドウ位置」→「今のウィンドウ位置を記憶」→ Cursor を閉じる → 右クリック →「立ち上げる」（推奨） / <strong>B</strong> = AI に任せる（AI が Cursor を 1 つ起動して実測。画面に Cursor ウィンドウが開きます）</td></tr>
+        <td><span class="status bad">今すぐ・目で確認</span></td>
+        <td>タイルを1枚マウスでつかんで別のタイルの左半分／右半分に落とし、その手前／直後に移ることを確認する（ドロップ先の枠と縦線が青くなります）</td>
+        <td>確認後にチャットへ返信: <strong>OK</strong> / <strong>NG</strong> = 違う点を一言</td></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>3</td>
-        <td><span class="status info">後でよい・コピペ</span></td>
-        <td>分割タイルを実運用で見る: dev フォルダの 2 つのターミナルでそれぞれ 1 回何か送信すると「dev ①」「dev ②」に分かれる（片方を閉じると約 30 秒で 1 枚に戻る）</td>
-        <td>見本: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/01-split-two-sessions.png">01-split-two-sessions.png</a> → <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/02-dead-pruned.png">02-dead-pruned.png</a></td></tr>
+        <td><span class="status warn">返信で選ぶ</span></td>
+        <td>「9. 確認事項」の3問（自動整列のタイミング・接続中の中での並び順・コミットの可否）に答える</td>
+        <td>例: <strong>1-A 2-A 3-A</strong>（全部おまかせなら「全部A」）</td></tr>
     </table></div>
   </section>
 
@@ -131,20 +131,20 @@
     <h2>3. 今回の差分</h2>
     <div class="table-wrap"><table>
       <tr><th>区分</th><th>内容</th></tr>
-      <tr><td>前回からの推移</td><td>状態: 完了（260903_1/_2）→ 要確認（今回） / 自己採点: 90 → 85 / 残タスク: 2件 → 3件（今回の新機能ぶんの実機確認が増えたため）</td></tr>
-      <tr><td>新しく完了</td><td>#1 バッジを名前の下の行へ / #2 掃引 15 秒化・確認待ちからの自動復帰・青の点滅 / #3 分割タイル（生死は Claude Code の登録簿で判定）/ #3 ウィンドウ位置の記憶・復元・一括操作・立ち上げ後の自動適用。前回分（260903_1/_2）も別コミット ba4012a として保存</td></tr>
-      <tr><td>新しく発生した懸念</td><td>生死判定が Claude Code の内部ファイル（登録簿）に依存する。形式が変わると判定不能になるが、その場合は従来の判定に自動で戻る設計（懸念事項 1）</td></tr>
-      <tr><td>解消済み</td><td>名前が「商品登…」と切れる問題 / 許可した後も「確認待ち・13分前」のまま残る問題（実ログ 9/3 で 4 回連続を確認していたもの）/ 同じフォルダの 2 本目のセッションが隠れる問題</td></tr>
-      <tr><td>未変化</td><td>未接続（灰色）判定の 5 秒間隔（あなたの選択で変更なし）/ terminal-app 自身のウィンドウ位置は保存しない（あなたの選択で対象外）</td></tr>
+      <tr><td>前回からの推移</td><td>状態: 要確認 → 要確認 / 自己採点: 85 → 88 / 残タスク: 3件 → 3件（前回の3件は別案件 260904_1 のもの。引き継ぎ状況は未確認）</td></tr>
+      <tr><td>新しく完了</td><td>整列ボタン（#1）、タイルのドラッグ&amp;ドロップ並べ替え（#2）、自動整列（接続中を左上へ）、並び順の保存（projects.json の配列順）、E2Eテスト台本 <code>scripts/verify-arrange-e2e.mjs</code>、単体テスト2ファイル（19件）</td></tr>
+      <tr><td>新しく発生した懸念</td><td>自動整列は「ボタンを押した時に1回」動く仕様にした（常時自動ではない）。接続中グループの中は今の順序を保つ。どちらも仮定なので意図と違えば変更が必要</td></tr>
+      <tr><td>解消済み</td><td>該当なし（今回は新機能の追加のみ）</td></tr>
+      <tr><td>未変化</td><td>コミット（変更の保存記録）は指示待ちのため未実施（前回同様）</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-4">
     <h2>4. 現状サマリー</h2>
     <div class="table-wrap"><table>
-      <tr><th>目的</th><td>2026-09-04 の画面メモ #1〜#3（表示名とバッジの重なり／監視間隔と確認待ちの青点滅／複数ターミナルのタイル分割とウィンドウ位置の固定）を実装し、稼働中のアプリに反映する</td></tr>
-      <tr><th>今回できたこと</th><td>4 件すべて実装。自動テスト 47 件追加（合計 375 件成功）、デモ画面の E2E（8 項目）と、実際に動いている claude の登録簿を使ったライブ E2E（9 項目）が成功。Win32 API（Windows のウィンドウ操作の窓口）の実機呼び出しも成功。稼働アプリを新ビルドで再起動済み</td></tr>
-      <tr><th>まだ残っていること</th><td>「立ち上げる」→ Cursor 起動 → 記憶位置へ自動で戻る、の一連の流れを実際の Cursor で実測していない（部品ごとの動作は確認済み）</td></tr>
+      <tr><th>目的</th><td>画面メモ #1「整列ボタンを追加」・#2「ドラッグドロップでカードを並べ替え」と、依頼文「自動整列で接続中のアプリを左上に」を terminal-app に実装する</td></tr>
+      <tr><th>今回できたこと</th><td>(1) タイトルバー右のボタン群に整列ボタンを追加。押すと接続中（対象アプリのウィンドウがある、または実行中・確認待ち）のタイルが左上から並び、未接続（灰色）が末尾へ移る。(2) タイルをマウスでつかんで別タイルの左半分／右半分に落とすと、その手前／直後へ移動。分割タイル ①② はプロジェクト単位で一緒に動く。(3) 並び順は projects.json（登録プロジェクト一覧の保存ファイル）の配列順としてそのまま保存され、再起動後も保持される。(4) フォルダを落として登録する既存のドロップ機能と混ざらないことも自動確認済み</td></tr>
+      <tr><th>まだ残っていること</th><td>実アプリでの人の手によるマウス操作の確認（自動確認は合成イベントで実施済み）／仮定2点の確認／コミット</td></tr>
       <tr><th>作業を止めている問題</th><td>該当なし</td></tr>
     </table></div>
   </section>
@@ -153,16 +153,14 @@
     <h2>5. プラン進捗（計画の進み具合）</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
-      <tr><td>認識合わせ（4 問 → 確定仕様の承認）</td><td><span class="status ok">完了</span></td><td>AskUserQuestion 2 ラウンド。分割=自動 / 位置=Cursor のウィンドウ / 監視=完了・切断の見直し 15 秒 / バッジ=名前の下</td></tr>
-      <tr><td>前回分（260903_1/_2）の別コミット</td><td><span class="status ok">完了</span></td><td>commit ba4012a（テスト 328 件成功を確認してから保存）</td></tr>
-      <tr><td>#1 バッジを名前の下の行へ</td><td><span class="status ok">完了</span></td><td>src/renderer/styles.css（.tile-head を縦並び）・renderer.ts・E2E で「名前が切れない／バッジが下」を確認</td></tr>
-      <tr><td>#2 掃引 15 秒化・確認待ちからの自動復帰</td><td><span class="status ok">完了</span></td><td>src/main/liveness-monitor.ts（findResumedFromConfirm）・state-store.ts（resumeFromConfirm）・ライブ E2E で復帰を実測</td></tr>
-      <tr><td>#2 確認待ちの青点滅</td><td><span class="status ok">完了</span></td><td>styles.css（blink 1s step-end。光・アイコン・枠線が青）・E2E の computed style で確認</td></tr>
-      <tr><td>#3 分割タイル（登録簿による生死判定）</td><td><span class="status ok">完了</span></td><td>src/main/session-registry.ts・state-store.ts（splitSessions ほか）・index.ts（掃引）・renderer.ts・ライブ E2E で「架空セッションが 2 回の掃引で消える」を実測</td></tr>
-      <tr><td>#3 ウィンドウ位置の記憶・復元（部品）</td><td><span class="status ok">完了</span></td><td>src/main/window-control.ts（GetWindowPlacement / SetWindowPlacement）・window-bounds.ts・project-store.ts・右クリックメニュー・設定画面の一括ボタン。実 Cursor ウィンドウで読み取り→同じ位置へ適用→画面外の拒否を確認</td></tr>
-      <tr><td>#3 「立ち上げる」後の自動復元（通し）</td><td><span class="status warn">一部完了</span></td><td>index.ts（scheduleRestoreAfterLaunch）実装済み・型と lint は通過。実際に Cursor を起動しての実測は未実施</td></tr>
-      <tr><td>テスト・ビルド・E2E・証跡</td><td><span class="status ok">完了</span></td><td>tests/ 6 ファイル追加、scripts/verify-split-blink-e2e.mjs、scripts/verify-liveness-registry-e2e.mjs、docs/evidence/20260904-*</td></tr>
-      <tr><td>ドキュメント・コミット・稼働アプリ再起動</td><td><span class="status ok">完了</span></td><td>README.md・docs/spec.md・docs/design.md 更新、commit 3837d29、06:17 再起動（app.log に起動記録）</td></tr>
+      <tr><td>純関数（自動整列の順序計算・D&amp;D の移動計算・接続中判定）を先にテストで定義</td><td><span class="status ok">完了</span></td><td><code>tests/format-arrange.test.ts</code>（14件、先に失敗を確認してから実装） → <code>src/renderer/format.ts</code></td></tr>
+      <tr><td>並び順の保存（projects.json の配列順を並べ替える）</td><td><span class="status ok">完了</span></td><td><code>tests/project-store-reorder.test.ts</code>（5件） → <code>src/main/project-store.ts</code> の reorderProjects</td></tr>
+      <tr><td>画面とアプリ本体をつなぐ配線（型定義・preload・IPC）</td><td><span class="status ok">完了</span></td><td><code>src/shared/types.d.ts</code> / <code>src/preload/index.ts</code> / <code>src/main/index.ts</code>（reorder-projects）</td></tr>
+      <tr><td>整列ボタン・タイルのドラッグ&amp;ドロップ・挿入位置の目印</td><td><span class="status ok">完了</span></td><td><code>src/renderer/index.html</code> / <code>renderer.ts</code> / <code>styles.css</code></td></tr>
+      <tr><td>E2Eテスト（実 Electron を遠隔操作して確認）と証跡画像</td><td><span class="status ok">完了</span></td><td><code>scripts/verify-arrange-e2e.mjs</code> 全20項目 OK → <code>docs/evidence/20260906-arrange/</code>（画像5枚を目視確認）</td></tr>
+      <tr><td>仕様書・設計書・検証書・計画書の追記</td><td><span class="status ok">完了</span></td><td><code>docs/spec.md</code>（REQ-15/16, AC-19/20） / <code>docs/design.md</code>（6.2, 9, 11章） / <code>docs/verification.md</code>（V-21） / <code>plans/plan.md</code></td></tr>
+      <tr><td>稼働中アプリへの反映（再起動）</td><td><span class="status ok">完了</span></td><td>旧プロセス 76988 を終了 → 新プロセス 89908 を 06:12:18 に起動。起動ログにエラーなし</td></tr>
+      <tr><td>コミット（変更の保存記録）</td><td><span class="status warn">未着手</span></td><td>指示待ち（12ファイル変更＋新規4件）</td></tr>
     </table></div>
   </section>
 
@@ -171,11 +169,11 @@
     <div class="table-wrap"><table>
       <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
       <tr><td>あなた（ユーザー）の判断待ち</td>
-        <td class="priority-mid">中</td><td>「記憶 → 立ち上げる → 自動で戻る」の実機確認</td><td>Cursor を実際に起動する必要があり、AI が勝手にやると画面にウィンドウが開くため</td><td>セクション 2 の 2 番で A/B を返信</td></tr>
+        <td class="priority-high">高</td><td>実アプリで整列ボタンとドラッグ並べ替えを実際に触って確認する</td><td>自動確認は合成イベント（プログラムが作ったマウス操作）なので、本物のマウス操作の手触りは人の確認が必要</td><td>「2. あなたの次のアクション」の 1・2</td></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td>
+        <td class="priority-mid">中</td><td>仮定2点（自動整列は押した時だけ／接続中の中は今の順序を維持）の可否</td><td>依頼文だけでは決められなかったため、安全側の解釈で実装した</td><td>「9. 確認事項」の 1・2 に返信</td></tr>
       <tr><td>AIがこのまま進められる</td>
-        <td class="priority-low">低</td><td>登録簿の status（busy / waiting / idle）を状態表示そのものの正にする案の設計</td><td>hook より確実にセッション状態が分かる可能性がある（今回は生死と復帰にだけ使用）</td><td>「登録簿 status で状態判定する案を設計して」と返信</td></tr>
-      <tr><td>AIがこのまま進められる</td>
-        <td class="priority-low">低</td><td>点滅の速さ・強さの調整</td><td>1 秒周期は目立つ反面、人によっては疲れる可能性がある</td><td>気になったら「点滅を 2 秒周期にして」等と返信</td></tr>
+        <td class="priority-mid">中</td><td>変更をコミット（保存記録）する</td><td>今回の変更はまだ作業ツリーにあるだけで、記録されていない</td><td>「コミットして」と返信（「14. AIが次にできること」の 1）</td></tr>
     </table></div>
   </section>
 
@@ -183,12 +181,12 @@
     <h2>7. 自己採点</h2>
     <div class="table-wrap"><table>
       <tr><th>観点</th><th>配点</th><th>得点</th><th>根拠</th></tr>
-      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>28</td><td>#1〜#3 の 4 件をすべて実装し稼働中。減点は「立ち上げる後の自動復元」の通し確認が残っている点</td></tr>
-      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>17</td><td>判定ロジックは純関数に分けて単体テスト化。登録簿が無い環境では従来動作に自動で戻る。減点は index.ts が 1,100 行超と大きくなった点</td></tr>
-      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>15</td><td>単体 375 件・E2E 2 本（うち 1 本は実登録簿）・Win32 実機呼び出し・稼働アプリ再起動まで実施。Cursor 起動を伴う通し確認と、実運用での長時間観察は未実施</td></tr>
-      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>12</td><td>登録簿の読み取り競合は「2 回連続」で確定、画面外の位置は復元しない、E2E は既存分も再実行して回帰なし。減点は内部ファイル依存という構造的リスク</td></tr>
-      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>確認事項を A/B 形式にし、見本のスクリーンショットを付けた。専門用語は辞典に集約</td></tr>
-      <tr><th>総合</th><th>100</th><th>85</th><th>実装と検証は十分だが、1 つの通し確認が残るため「要確認」</th></tr>
+      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>27</td><td>#1 整列ボタン・#2 D&amp;D 並べ替え・自動整列（接続中を左上へ）の3点すべて実装し、並び順も保存される。自動整列のタイミングとグループ内の順序は仮定で決めたため満点にしない</td></tr>
+      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>テストを先に書いて失敗を確認してから実装（TDD）。順序計算を画面に依存しない純関数に分離。既存のフォルダ登録ドロップと専用 MIME で切り分け。順序が同じなら保存も再描画もしない</td></tr>
+      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>17</td><td>単体テスト394件（新規19件）・型チェック・Lint・ビルド・E2Eテスト20項目すべて成功。証跡画像5枚を目視。実アプリでの本物のマウス操作は未実施（本番の projects.json を触らないため）</td></tr>
+      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>フォルダ登録ドロップの回帰（既存機能が壊れていないか）を E2E で確認。分割タイルの扱い・未知 id・重複 id・自分自身へのドロップなど境界を単体テストで固定。合成イベントと実マウスの差は残る</td></tr>
+      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>仮定を明示し、確認事項を A/B 形式にした。仕様書・設計書・検証書にも追記済み</td></tr>
+      <tr><th>総合</th><th>100</th><th>88</th><th>機能は3点とも完成し検証済み。仮定2点の確認と実操作の確認が残るため「要確認」</th></tr>
     </table></div>
   </section>
 
@@ -196,10 +194,9 @@
     <h2>8. 懸念事項</h2>
     <div class="table-wrap"><table>
       <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
-      <tr><td class="priority-mid">中</td><td>生死判定は Claude Code の内部ファイル（~/.claude/sessions/&lt;pid&gt;.json）に依存し、公式に説明されていない</td><td>Claude Code の更新で形式が変わると、終了したセッションの枠が消えなくなる（従来と同じ見え方に戻るだけで、壊れはしない）</td><td>登録簿が読めないときは判定不能として従来動作に戻る設計。更新後に枠が消えなくなったら知らせてください</td></tr>
-      <tr><td class="priority-mid">中</td><td>「立ち上げる」後の自動復元は、Cursor 自身の前回位置の復元と重なる可能性がある</td><td>一瞬だけ Cursor の位置で出てから記憶位置へ動く、または Cursor 側が上書きする</td><td>ウィンドウ出現から 1.5 秒待って適用し、さらに 1.5 秒後にもう一度適用する実装。実機で確認して調整</td></tr>
-      <tr><td class="priority-low">低</td><td>確認待ちの点滅は当初仕様（呼吸発光のみ）の例外</td><td>常時 1 秒周期で点滅するため、長時間放置すると目立ちすぎる可能性</td><td>あなたの指示なので採用。周期は CSS 1 行で変更可能（docs/spec.md にも例外として記載）</td></tr>
-      <tr><td class="priority-low">低</td><td>分割タイルの番号（①②）は起動順で、どのターミナルが①かはアプリからは分からない</td><td>Cursor 側のターミナル並びと一致しない場合がある</td><td>タイルの作業テキスト（送信した指示）で見分ける。必要なら Claude Code 側のセッション名を出す案を検討</td></tr>
+      <tr><td class="priority-mid">中</td><td>自動整列は「押した時に1回」だけ動く。接続状態が変わっても勝手に並び替わらない</td><td>常に自動で並び替わることを期待していると「整列されていない」と感じる</td><td>意図と違えば常時追従（5秒ごとの接続判定に合わせて自動で並び替え）に変更できる（確認事項1）</td></tr>
+      <tr><td class="priority-mid">中</td><td>接続中グループの中は今の順序（ドラッグで決めた順）を保つ。状態（確認待ち・実行中・完了）では並べない</td><td>「確認待ちを一番前に」等の期待があると合わない</td><td>状態順（確認待ち → 実行中 → 完了 → 待機）の並べ替えを追加できる（確認事項2）</td></tr>
+      <tr><td class="priority-low">低</td><td>D&amp;D の自動確認は合成イベント。本物のマウスでは button 要素のドラッグ開始の手触り（少し動かすと始まる）が異なる可能性</td><td>つかみにくい・クリックと誤認する等の体験差</td><td>実アプリで一度触って確認（次のアクション2）。問題があれば調整する</td></tr>
     </table></div>
   </section>
 
@@ -208,22 +205,24 @@
     <p class="muted">記号だけ返信すれば伝わります（例: 「1-A 2-B」）。全部おまかせなら「全部A」でも大丈夫です。</p>
     <div class="table-wrap"><table>
       <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
-      <tr><td>1</td><td class="priority-mid">中</td><td>「記憶 → 立ち上げる → 自動で戻る」の実機確認を誰がやるか</td>
-        <td><strong>A</strong> = 自分で試す（右クリックの手順で 1 分。画面を汚さない）（推奨） / <strong>B</strong> = AI が実測する（Cursor が 1 つ開き、位置が動く様子をログで確認）</td></tr>
-      <tr><td>2</td><td class="priority-low">低</td><td>確認待ちの点滅の速さ</td>
-        <td><strong>A</strong> = このまま 1 秒周期（目立つ。推奨） / <strong>B</strong> = 2 秒周期にゆるめる（落ち着くが気づきにくい）</td></tr>
+      <tr><td>1</td><td class="priority-mid">中</td><td>自動整列はいつ動くのがよいですか</td>
+        <td><strong>A</strong> = 整列ボタンを押した時だけ（今の実装。タイルが勝手に動かない）（推奨） / <strong>B</strong> = 常時自動（接続状態が変わるたびに並び替わる）</td></tr>
+      <tr><td>2</td><td class="priority-mid">中</td><td>接続中グループの中の並び順はどうしますか</td>
+        <td><strong>A</strong> = 今の順序を維持（ドラッグで決めた順を尊重）（推奨） / <strong>B</strong> = 状態順に並べる（確認待ち → 実行中 → 完了 → 待機）</td></tr>
+      <tr><td>3</td><td class="priority-low">低</td><td>今回の変更をコミット（保存記録）してよいですか</td>
+        <td><strong>A</strong> = 触って確認してからコミット（推奨） / <strong>B</strong> = 今すぐこの内容でコミット</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-10">
     <h2>10. 対象外・未対応（今回やっていないこと）</h2>
     <ul>
-      <li>terminal-app 自身のウィンドウ位置の保存（あなたの選択で対象外。起動のたびに 680×520 で中央に出る従来どおり）</li>
-      <li>未接続（灰色）判定の間隔（5 秒のまま。あなたの選択で対象外）</li>
-      <li>分割した枠ごとの表示名・手動ステータスの設定（あなたの選択で「自動分割・設定なし」を採用。バッジはプロジェクト共通）</li>
-      <li>Cursor の中の特定のターミナルタブへの前面化（Windows の仕組み上、外からはウィンドウ単位までしか選べない）</li>
-      <li>SessionEnd（セッション終了）の hook 登録（既存の自動テストが登録イベント一覧を固定しているため未登録のまま。終了検知は登録簿で代替）</li>
-      <li>完了（緑）の光の見え方は従来どおり（呼吸発光。点滅にしたのは確認待ちだけ）</li>
+      <li>常時の自動整列（接続状態の変化に追従して勝手に並び替える）は入れていない（確認事項1）</li>
+      <li>接続中の中を状態順（確認待ち・実行中・完了）で並べることはしていない（確認事項2）</li>
+      <li>並び順を「登録順に戻す」ボタンは作っていない（ドラッグで戻せるため）</li>
+      <li>設定画面のプロジェクト一覧の並べ替え UI は作っていない（タイルの順に連動して表示されるのみ）</li>
+      <li>本番の projects.json（登録一覧の保存ファイル）は触っていない。実アプリでの整列ボタン操作は未実施</li>
+      <li>コミット（変更の保存記録）は指示待ちのため未実施</li>
     </ul>
   </section>
 
@@ -231,32 +230,31 @@
     <h2>11. 検証・実施ログ</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>結果</th><th>内容</th></tr>
-      <tr><td>変更ファイル</td><td><span class="status info">34件</span></td><td>src/main（session-registry.ts・window-bounds.ts 新規、state-store.ts・liveness-monitor.ts・window-control.ts・project-store.ts・index.ts・demo.ts）、src/renderer（renderer.ts・styles.css・index.html）、src/preload、src/shared/types.d.ts、tests/ 6 本、scripts/ 2 本、docs、README、plans/plan.md</td></tr>
-      <tr><td>動作テスト（自動テスト）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>（プログラムの各部品が期待どおり動くかの確認）: 44 ファイル / 375 件成功（今回追加 47 件: 登録簿の解釈・生死分類、分割一覧、確認待ち復帰、ウィンドウ位置の検証と保存）</td></tr>
-      <tr><td>E2E（デモ画面）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-split-blink-e2e.mjs docs/evidence/20260904-split-blink</code>（実際のアプリ画面を開いて見え方を確認）: 8 項目すべて期待どおり。バッジが名前の下 / 確認待ちの光が青で blink 1s / ①② の分割と隣接 / 件数が表示タイル基準 / 設定画面のボタン</td></tr>
-      <tr><td>E2E（実登録簿ライブ検証）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-liveness-registry-e2e.mjs docs/evidence/20260904-liveness</code>（実際に動いている claude の登録簿と架空セッションで生死判定を確認）: 9 項目すべて期待どおり。架空セッションが 2 回の掃引で終了確定 → 切断 → 破棄され分割が解ける / 確認待ち → transcript 更新で「実行中」へ復帰（ログ 21:20:21Z）</td></tr>
-      <tr><td>Win32 API 実機呼び出し</td><td><span class="status ok">成功</span></td><td>実際の Cursor ウィンドウ（terminal-app）で配置の読み取り (642, 231) 1281×801 → 同じ位置への適用 → 再読み取り一致 → 画面外 (30000, 30000) は「復元しない」と拒否</td></tr>
-      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を実行できる JavaScript に変換）: 成功</td></tr>
-      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>・<code>npm run lint</code>（型の整合性と書き方の自動チェック）: 指摘なし</td></tr>
-      <tr><td>既存 E2E の回帰確認</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-unlinked-rename-e2e.mjs</code>（前回機能の未接続タイル・表示名変更が壊れていないかの確認）: ALL OK</td></tr>
-      <tr><td>稼働アプリの再起動</td><td><span class="status ok">成功</span></td><td>旧プロセスを穏当に終了 → 新ビルドで起動（app.log 21:17:47Z「terminal-app 起動」）。直後に商品登録アプリの確認待ちイベントを受信して表示できている</td></tr>
-      <tr><td>「立ち上げる」→ 自動復元の通し確認</td><td><span class="status warn">未実施</span></td><td>実際に Cursor を起動する必要があるため未実施（部品ごとの動作は上記で確認済み）。実行していないため通しの動作は未保証</td></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">12件変更 + 新規4件</span></td><td>src: renderer.ts / format.ts / index.html / styles.css / project-store.ts / index.ts / preload / types.d.ts、docs: spec / design / verification / plan。新規: tests 2本・scripts/verify-arrange-e2e.mjs・docs/evidence/20260906-arrange/</td></tr>
+      <tr><td>単体テスト（部品ごとの自動テスト）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>: 46ファイル 394件すべて成功。新規19件は先に失敗（関数未定義）を確認してから実装して成功に変えた</td></tr>
+      <tr><td>動作テスト（E2Eテスト）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-arrange-e2e.mjs docs/evidence/20260906-arrange</code>: 実 Electron をデモデータ12件で起動し遠隔操作。自動整列で接続中10件が先頭・未接続2件が末尾、再押下は「整列済み」案内、ドラッグで手前／直後の両方向、保存ファイルへの反映、内部ドラッグ中はフォルダ登録の覆いが出ない、フォルダのドロップは従来どおり覆いが出る、の20項目すべて OK</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>: TypeScript を JavaScript に変換し、画面ファイルを dist へコピー。整列ボタンが出力に含まれることを確認</td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>（型の整合性）と <code>npm run lint</code>（書き方の自動チェック）とも指摘なし</td></tr>
+      <tr><td>稼働中アプリの再起動（新ビルドの反映）</td><td><span class="status ok">成功</span></td><td>旧プロセス 76988 に終了を送り、終了を待ってから新プロセス 89908 を起動（06:12:18）。app.log に「終了」「起動」「window shown」が記録され、エラー行は0件</td></tr>
+      <tr><td>実アプリでの実操作（整列ボタン・マウスドラッグ）</td><td><span class="status warn">未実施</span></td><td>本番の登録一覧を触らないため実施していない。自動確認はデモデータで実施済み。あなたの操作で確認してください</td></tr>
     </table></div>
     <details><summary>詳細ログ・スクリーンショット</summary>
-      <p>デモ画面（バッジ位置・青点滅・分割タイル）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-split-blink/01-main-split-blink-badge.png">01-main-split-blink-badge.png</a><br>
-         C:\Users\hppym\dev\terminal-app\docs\evidence\20260904-split-blink\01-main-split-blink-badge.png</p>
-      <p>設定画面（ウィンドウ位置の一括ボタン）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-split-blink/02-settings-window-bounds.png">02-settings-window-bounds.png</a><br>
-         C:\Users\hppym\dev\terminal-app\docs\evidence\20260904-split-blink\02-settings-window-bounds.png</p>
-      <p>ライブ検証（分割 → 架空セッション破棄 → 確認待ち → 復帰）:
-         <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/01-split-two-sessions.png">01</a> /
-         <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/02-dead-pruned.png">02</a> /
-         <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/03-confirm.png">03</a> /
-         <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/04-resumed-running.png">04</a> /
-         <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260904-liveness/app.log">app.log</a><br>
-         C:\Users\hppym\dev\terminal-app\docs\evidence\20260904-liveness\</p>
-      <p>ライブ検証で拾った生存セッション: e265d7a7（Cursor 拡張から起動した claude、登録簿 status なし → transcript 更新の規則で復帰）。架空セッション 00000000-dead-… は掃引 2 回（設定 2 秒間隔）で「セッション終了を確認（登録簿にプロセスなし）」→「実行中のまま終了 → 切断表示」→「終了済みセッションの記録を破棄」の 3 行がログに残った。</p>
-      <p>実運用の根拠（変更前の実ログ 2026-09-03 20:27〜20:41Z）: 商品登録アプリで permission → confirm が 4 回続き、間に「実行中」へ戻すイベントが無かった（= 今回 #2 で直した現象）。同じログで dev フォルダの 2 セッション（066dd896 / fe0797db）が同時に動いていた（= #3 分割の対象）。</p>
-      <p>掃引間隔などの検証用の値: <code>TERMINAL_APP_LIVENESS_INTERVAL_MS</code>（既定 15000）、<code>TERMINAL_APP_CONFIRM_RESUME_MARGIN_MS</code>（既定 3000）、<code>TERMINAL_APP_CONFIRM_RESUME_MIN_AGE_MS</code>（既定 5000）。</p>
+      <p>E2Eテストの画面（クリックで開く。生パスも併記）:</p>
+      <ul>
+        <li>整列前（登録順。整列ボタンがフォルダ追加の右隣に出ている）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/01-main-before.png">01-main-before.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\01-main-before.png</li>
+        <li>自動整列後（接続中10件が左上から、未接続2件が末尾で灰色。下部に案内文）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/02-main-arranged.png">02-main-arranged.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\02-main-arranged.png</li>
+        <li>ドラッグ中（ドロップ先「在庫管理-app」の枠と左の縦線が青、ドラッグ元「売上レポート-app」は薄く表示）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/03-main-drag-marker.png">03-main-drag-marker.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\03-main-drag-marker.png</li>
+        <li>ドロップ後（末尾のタイルが先頭へ移動）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/04-main-after-drop-front.png">04-main-after-drop-front.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\04-main-after-drop-front.png</li>
+        <li>右方向へのドロップ後（先頭のタイルが3番目の直後へ）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/05-main-after-drop-right.png">05-main-after-drop-right.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\05-main-after-drop-right.png</li>
+        <li>E2E の判定結果: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/result.json">result.json</a>（failures が空 = 全項目 OK）</li>
+      </ul>
+      <p>仕様の要点（仮定を含む）:</p>
+      <ul>
+        <li>接続中の判定は既存の「未接続（灰色）」判定の逆。対象アプリのウィンドウがあるか、実行中・確認待ちなら接続中。分割タイルは1本でも接続中なら接続中</li>
+        <li>自動整列は接続中グループ・未接続グループそれぞれの相対順を保つ。押しても順序が変わらなければ「すでに整列済みです（接続中 N 件が先頭）」と案内</li>
+        <li>ドロップ位置はドロップ先タイルの左半分 = 手前、右半分 = 直後。分割タイル ①② はプロジェクト単位で一緒に動く</li>
+        <li>並び順は projects.json の配列順そのもの（新しい項目は追加していない）。順序が同じなら保存しない</li>
+      </ul>
     </details>
   </section>
 
@@ -268,8 +266,8 @@
       <tr><th>役割</th><th>担当</th><th>モデルID</th><th>備考</th></tr>
       <tr><td>進行管理（全体のとりまとめ）</td><td>メインセッション（この会話のAI）</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
       <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>サブエージェント（別のAI）は使っていない</td></tr>
-      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>Codex への委任なし</td></tr>
-      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>自動テスト・E2E の実行と自己採点</td></tr>
+      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>Codex への委任なし（CLAUDE.md の既定どおり直接実装）</td></tr>
+      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>自動テスト・E2E・証跡画像の目視・自己採点とも同一セッション</td></tr>
     </table></div>
   </section>
 
@@ -281,37 +279,39 @@
     <div class="table-wrap"><table>
       <tr><th>用語</th><th>意味</th></tr>
       <tr><td>モデルID</td><td>AIの種類を表す正式な名前。同じ「Claude」でも性能や世代が違うため、この名前でどのAIが作業したかを特定できる</td></tr>
-      <tr><td>hook（フック）</td><td>Claude Code が「送信した」「完了した」「確認が必要」などの節目に外部へ知らせる仕組み。terminal-app はこれを受けてタイルを更新する</td></tr>
-      <tr><td>transcript（トランスクリプト）</td><td>Claude Code が会話の記録を書き続けるファイル。更新時刻から「まだ動いているか」を推定できる</td></tr>
-      <tr><td>セッション登録簿</td><td>Claude Code 自身が ~/.claude/sessions に書く「今動いている claude の一覧」。終了するとファイルが消える</td></tr>
-      <tr><td>PID</td><td>Windows がプログラムごとに付ける番号。番号が生きていればそのプログラムは動いている</td></tr>
-      <tr><td>掃引（スイープ）</td><td>15 秒ごとに全セッションを見回り、終了・切断・確認待ちからの復帰を判定する処理</td></tr>
-      <tr><td>E2E テスト</td><td>実際の画面操作をなぞる動作確認。今回はアプリを実際に起動し、CDP（画面を外から操作する仕組み）で確認した</td></tr>
-      <tr><td>Win32 API / koffi</td><td>Windows のウィンドウを操作する窓口と、それを呼ぶための部品。ウィンドウ位置の読み取り・適用に使う</td></tr>
-      <tr><td>分割タイル</td><td>同じフォルダで 2 本以上の claude が動いているとき、タイルを「名前 ①」「名前 ②」に分けて表示すること</td></tr>
-      <tr><td>commit / ブランチ</td><td>変更の保存記録（commit）と作業用の枝分かれ（branch）。今回は main に 2 件保存（ba4012a と 3837d29）</td></tr>
+      <tr><td>D&amp;D（ドラッグ&amp;ドロップ）</td><td>マウスでつかんで別の場所に落とす操作。今回はタイルの並べ替えに使う</td></tr>
+      <tr><td>接続中 / 未接続</td><td>タイルのプロジェクトを開いている Cursor またはターミナルのウィンドウがある状態が接続中。無いと灰色の未接続</td></tr>
+      <tr><td>分割タイル ①②</td><td>同じフォルダで Claude Code が2本以上動いているときに、1プロジェクトが番号付きの複数タイルに分かれる表示</td></tr>
+      <tr><td>projects.json</td><td>登録したプロジェクトの一覧を保存するファイル。今回はこの並び順がそのままタイルの順になる</td></tr>
+      <tr><td>E2Eテスト</td><td>実際の画面操作をなぞる動作確認。今回はプログラムが本物のアプリを遠隔操作して確認した</td></tr>
+      <tr><td>合成イベント</td><td>プログラムが作った疑似的なマウス操作。本物のマウスと同じ手順でアプリに伝える</td></tr>
+      <tr><td>単体テスト（vitest）</td><td>部品ごとの自動テスト。vitest はその実行ツール</td></tr>
+      <tr><td>TDD</td><td>先にテストを書いて失敗を確かめてから実装する進め方。テストが本当に機能を確かめていることを保証する</td></tr>
+      <tr><td>Lint / 型チェック / ビルド</td><td>コードの書き方・整合性の自動チェック / プログラムを動く形に変換する処理</td></tr>
+      <tr><td>Electron</td><td>Web の技術でデスクトップアプリを作る仕組み。terminal-app はこれで動いている</td></tr>
+      <tr><td>コミット</td><td>変更の保存記録（commit）。まだ実施していない</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-14">
     <h2>14. AIが次にできること（あなたの操作は不要）</h2>
     <ol>
-      <li>Cursor を実際に「立ち上げる」で起動し、記憶位置へ自動で戻るまでの流れをログで実測する（画面に Cursor ウィンドウが 1 つ開きます）
+      <li>今回の変更をコミット（保存記録）する
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>立ち上げ→位置復元を実測して</pre>
+          <pre>コミットして</pre>
         </div>
       </li>
-      <li>登録簿の status（busy / waiting / idle）を状態表示そのものの正にする案を設計する（hook より確実になる可能性）
+      <li>自動整列を常時追従（接続状態が変わるたびに自動で並び替え）に変更する
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>登録簿 status で状態判定する案を設計して</pre>
+          <pre>自動整列を常時オンにして</pre>
         </div>
       </li>
-      <li>点滅の周期や色味を調整する（CSS 1 行の変更で即反映）
+      <li>接続中グループの中も状態順（確認待ち → 実行中 → 完了 → 待機）に並べる
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>確認待ちの点滅を 2 秒周期にして</pre>
+          <pre>整列で状態順にも並べて</pre>
         </div>
       </li>
     </ol>
