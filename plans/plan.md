@@ -1,30 +1,28 @@
-# 260904_1 実装計画（画面メモ #1〜#3）
+# 260906_1 実装計画（画面メモ #1〜#2 ＋ 自動整列）
 
-依頼: 2026-09-04 スクリーンショット注釈 #1〜#3。確認済み仕様（AskUserQuestion 2 ラウンド）:
+依頼: 2026-09-06 スクリーンショット注釈 #1（整列ボタンを追加）・#2（ドラッグドロップでカードを並べ替え）＋
+テキスト「整列の機能で自動整列の機能を追加して、接続中のアプリを左上に持ってきてほしい」。
+自律実行（確認不可）のため、解釈の分かれる点は仮定（※）として明示し、完了報告にも載せる。
 
-| # | 確定仕様 |
+| # | 仕様（※ = 仮定） |
 |---|---------|
-| #1 | 手動ステータスのバッジを表示名の下の行へ（名前は 1 行いっぱい） |
-| #2 | 完了・切断の掃引 30 秒 → 15 秒。同周期で「確認待ち」中に transcript が更新（または登録簿 status=busy）なら「実行中」へ自動復帰。確認待ちは青（--accent）で 1 秒周期の点滅 |
-| #3 分割 | 同じフォルダで生きている claude が 2 本以上のときだけタイルを自動分割（「名前 ①②」起動順）。生死は `~/.claude/sessions/<pid>.json`（Claude Code 自身の登録簿）＋ PID 存在で判定。分割タイル右クリック「この枠を消す」。件数は表示タイル基準 |
-| #3 位置 | タイル右クリック「ウィンドウ位置を記憶／戻す／記憶を消す」、設定画面に全プロジェクト一括の記憶／復元。「立ち上げる」後は記憶位置へ自動適用。projects.json に保存（最大化保持・画面外は復元しない） |
+| #1 | タイトルバー右のボタン群（フォルダ登録の右隣）に「自動整列」ボタン。押すと接続中（既存の未接続判定 isUnlinked でない）プロジェクトを先頭＝左上へ、未接続を後ろへ寄せる。※各グループ内の相対順（D&D で決めた順）は維持する。※ボタン押下時の 1 回だけ実行し、5 秒ごとのウィンドウ判定に追従して勝手に並び替えない |
+| #2 | タイルを HTML5 D&D で並べ替え。ドロップ先タイルの左半分＝手前、右半分＝直後（アクセント色の縦線で挿入位置を示す）。分割タイル ①② はプロジェクト単位で一緒に動く。内部ドラッグは専用 MIME で識別し、フォルダ登録の D&D（オーバーレイ）と混ざらない |
+| 保存 | 並び順 = projects.json の配列順そのもの（新しいキーは持たない）。D&D・自動整列とも `reorderProjects(ids)` 1 本で保存し、順序が同じなら保存も配信もしない |
 
 ## モジュール
 
-1. `src/shared/types.d.ts` — WindowBounds / Project.windowBounds / SessionView.firstSeenAt / Snapshot.splitSessions / API 追加
-2. `src/main/session-registry.ts`（新規）— 登録簿の読み取り・生死分類（純関数 + fs）
-3. `src/main/state-store.ts` — dead フラグ・firstSeenAt・splitSessions・countTiles・resumeFromConfirm・removeSession・pruneDeadSessions
-4. `src/main/liveness-monitor.ts` — 15 秒・findResumedFromConfirm
-5. `src/main/window-bounds.ts`（新規）— WindowBounds の検証・整形（純関数）
-6. `src/main/window-control.ts` — GetWindowPlacement / SetWindowPlacement / MonitorFromRect
-7. `src/main/project-store.ts` — setWindowBounds・load 時の検証
-8. `src/main/index.ts` — 掃引の拡張・スナップショット・メニュー・IPC・立ち上げ後の位置復元
-9. `src/preload/index.ts` / `src/renderer/*` — 分割タイル・バッジ配置・青点滅・設定画面ボタン
-10. `src/main/demo.ts` — 分割タイルのシード（証跡用）
-11. `scripts/verify-split-blink-e2e.mjs`（新規）— CDP で証跡採取 → `docs/evidence/20260904-split-blink/`
+1. `src/shared/types.d.ts` — `reorderProjects(ids)` API
+2. `src/renderer/format.ts` — `projectLinked` / `autoArrangeIds` / `moveProjectId`（DOM 非依存の純関数。単体テスト対象）
+3. `src/main/project-store.ts` — `reorderProjects(ids)`（未知 id 無視・欠落は末尾に元順・重複は初出のみ・無変化は false）
+4. `src/main/index.ts` — IPC `reorder-projects`（引数検証・ログ・broadcast）
+5. `src/preload/index.ts` — ブリッジ
+6. `src/renderer/index.html` / `styles.css` / `renderer.ts` — 整列ボタン・タイル D&D（dragstart/dragover/drop/dragend）・挿入位置の目印・window 側の登録 D&D との切り分け
+7. `scripts/verify-arrange-e2e.mjs`（新規）— CDP ＋ 合成 DragEvent で証跡採取 → `docs/evidence/20260906-arrange/`
 
 ## 検証
 
-- `npm run typecheck` / `npm run lint` / `npm test`（新規テスト 6 本）
-- E2E（デモ）スクリーンショット、稼働アプリ再起動後の実ログ（掃引・登録簿・復帰）
+- `npm run typecheck` / `npm run lint` / `npm test`（新規テスト 2 ファイル 19 件: `tests/format-arrange.test.ts`・`tests/project-store-reorder.test.ts`）
+- E2E（デモ 12 件）: 自動整列で接続中 10 件が先頭・未接続 2 件が末尾、再押下は「整列済み」、D&D 手前／直後、永続化、登録 D&D の回帰
+- 稼働アプリを再起動して新ビルドを反映、実ログで「並び順変更」を確認
 - 完了報告 HTML（completion-dashboard.html）

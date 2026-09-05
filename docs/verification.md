@@ -40,6 +40,7 @@
 | V-18 MVP で通知音が無効・無音（should の逆検証） | AC-18 | REQ-12 | 手動 E2E | 6 章 #14 |
 | V-19 受信サーバが 127.0.0.1 のみバインド | — | NFR-04 | 統合 | 3.7 |
 | V-20 アイドル時 CPU 負荷 | — | NFR-07 | 手動計測 | 3.8 |
+| V-21 タイルの D&D 並べ替えと自動整列（260906_1） | AC-19, AC-20 | REQ-15, REQ-16 | 単体（`tests/format-arrange.test.ts`・`tests/project-store-reorder.test.ts`）＋ E2E（CDP・合成 DragEvent） | `scripts/verify-arrange-e2e.mjs` → `docs/evidence/20260906-arrange/` |
 
 **運用ルール**: spec.md の AC が増減したら本表を必ず同期する（対応の欠落 1 件も不可）。
 

@@ -1005,6 +1005,19 @@ function wireIpc(): void {
   ipcMain.handle("save-all-window-bounds", (): OpResult => saveAllWindowBounds());
   ipcMain.handle("restore-all-window-bounds", (): OpResult => restoreAllWindowBounds());
 
+  // タイルの並び順（260906_1）: D&D 並べ替え・自動整列のどちらも renderer が確定した id 順を渡す。
+  // 並び順 = projects.json の配列順そのもの（新しいキーは持たない）。順序が変わらなければ配信もしない
+  ipcMain.handle("reorder-projects", (_e, ids: unknown): OpResult => {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+      return { ok: false, error: "並び順の指定が不正です" };
+    }
+    if (projectStore.reorderProjects(ids as string[])) {
+      logger.info(`並び順変更: ${projectStore.projects.map((p) => p.name).join(" → ")}`);
+      broadcast();
+    }
+    return { ok: true };
+  });
+
   // 未接続タイルの表示／非表示（260903_1）: ステータスバーのトグル。config.json に保持
   ipcMain.handle("set-show-unlinked", (_e, value: boolean) => {
     projectStore.setShowUnlinked(value === true);

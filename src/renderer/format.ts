@@ -57,3 +57,39 @@ export function isUnlinked(present: boolean | undefined, state: SessionState | u
 export function fmtUnlinkedLabel(count: number): string {
   return `未接続を表示（${count}）`;
 }
+
+/**
+ * プロジェクト単位の「接続中」判定（260906_1）。isUnlinked をタイル単位からプロジェクト単位へ持ち上げる:
+ * 分割タイル（同じプロジェクトの複数セッション）はいずれか 1 本でも接続中なら接続中。
+ * states が空（表示セッション無し = 待機 1 タイル）は [undefined] として判定する
+ */
+export function projectLinked(present: boolean | undefined, states: (SessionState | undefined)[]): boolean {
+  const list = states.length > 0 ? states : [undefined];
+  return list.some((state) => !isUnlinked(present, state));
+}
+
+/**
+ * 自動整列（260906_1）: 接続中のプロジェクトを先頭（グリッドの左上）へ、未接続を後ろへ寄せる。
+ * それぞれのグループ内では元の相対順（ユーザーが D&D で決めた順）を保つ。
+ * linked に無い id は接続中扱い（判定不能を隠さない側 = isUnlinked の undefined と同じ）。
+ */
+export function autoArrangeIds(ids: readonly string[], linked: Record<string, boolean>): string[] {
+  const front = ids.filter((id) => linked[id] !== false);
+  const back = ids.filter((id) => linked[id] === false);
+  return [...front, ...back];
+}
+
+/**
+ * D&D 並べ替え（260906_1）: fromId を toId の手前（after=false）または直後（after=true）へ移した
+ * 新しい順序を返す。自分自身・未知の id は元の順序のコピーを返す。元配列は変更しない。
+ */
+export function moveProjectId(ids: readonly string[], fromId: string, toId: string, after: boolean): string[] {
+  const next = [...ids];
+  if (fromId === toId) return next;
+  const from = next.indexOf(fromId);
+  if (from < 0 || !next.includes(toId)) return next;
+  next.splice(from, 1);
+  const to = next.indexOf(toId); // 抜いた後の位置で数える（右方向の移動でずれない）
+  next.splice(after ? to + 1 : to, 0, fromId);
+  return next;
+}

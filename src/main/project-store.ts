@@ -246,6 +246,27 @@ export class ProjectStore {
     return { ok: true, name: p.name };
   }
 
+  /**
+   * タイルの並び順の変更（260906_1: D&D 並べ替え・自動整列）。並び順 = projects.json の配列順そのもの。
+   * ids の順に並べ、未知の id は無視、ids に無い既存プロジェクトは元の相対順で末尾に残す（増減しない）。
+   * 順序が変わらなければ保存せず false を返す
+   */
+  reorderProjects(ids: readonly string[]): boolean {
+    const byId = new Map(this._projects.map((p) => [p.id, p] as const));
+    const next: Project[] = [];
+    for (const id of ids) {
+      const p = byId.get(id);
+      if (p !== undefined && !next.includes(p)) next.push(p);
+    }
+    for (const p of this._projects) {
+      if (!next.includes(p)) next.push(p);
+    }
+    if (next.every((p, i) => p === this._projects[i])) return false;
+    this._projects = next;
+    this.saveProjects();
+    return true;
+  }
+
   /** ウィンドウ位置の記憶／消去（260904_1 #3）。null で記憶を消す。不正値は拒否 */
   setWindowBounds(id: string, bounds: WindowBounds | null): boolean {
     const p = this._projects.find((x) => x.id === id);

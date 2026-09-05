@@ -145,6 +145,26 @@ body {
     0 1px 3px var(--shadow);
 }
 
+/* --- タイルの D&D 並べ替え（260906_1 #2）。ドラッグ元は薄く、挿入位置はタイルの左右の隙間に
+   アクセント色の縦線で示す（gap 10px の中央あたり） --- */
+.tile.is-dragging { opacity: 0.35; transform: none; }
+/* ドロップ先はタイルの枠もアクセント色にして、左端タイル（縦線が余白に出る）でも目印が見えるようにする */
+.tile.drop-before,
+.tile.drop-after { border-color: var(--accent); }
+.tile.drop-before::before,
+.tile.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 6px; bottom: 6px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  pointer-events: none;
+}
+.tile.drop-before::before { left: -7px; }
+.tile.drop-after::after { right: -7px; }
+
 /* --- キーの下から漏れる光（NFR-06: 完了は約 2.4s の呼吸。確認待ちだけは 260904_1 #2 で青の点滅） --- */
 .tile-glow {
   position: absolute;

@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked } from "./format.js";
+import { autoArrangeIds, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectLinked } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -29,6 +29,16 @@ const PROJECT_FOLD_LIMIT = 5;
  */
 const tileEls = new Map<string, HTMLButtonElement>();
 const tileSessions = new Map<string, SessionView | undefined>();
+
+/**
+ * タイルの D&D 並べ替え（260906_1 #2）。内部ドラッグは専用 MIME で識別し、フォルダ登録の外部 D&D
+ * （window の dragenter/drop）と混ざらないようにする。移動はプロジェクト単位（分割タイル ①② は一緒に動く）
+ */
+const TILE_MIME = "application/x-terminal-app-tile";
+/** ドラッグ中のプロジェクト id（内部ドラッグ中のみ。dragend / drop で戻す） */
+let draggingProjectId: string | null = null;
+/** 挿入位置の目印（drop-before / drop-after）を付けているタイル */
+let dropTargetEl: HTMLElement | null = null;
 
 /** 1 タイル分の描画指示（renderGrid が Snapshot から組み立てる） */
 interface TileSpec {
@@ -161,7 +171,115 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
     e.preventDefault();
     void api.showTileMenu(project.id, sessionId);
   });
+  wireTileDrag(el, project.id);
   return el;
+}
+
+/* ---------------- タイルの D&D 並べ替え（260906_1 #2） ---------------- */
+
+/** 内部（タイル）ドラッグか。dragenter/dragover 中は getData 不可のため types で判定する */
+function isTileDrag(dt: DataTransfer | null): boolean {
+  return draggingProjectId !== null || (dt !== null && Array.from(dt.types).includes(TILE_MIME));
+}
+
+function clearDropMarker(): void {
+  if (dropTargetEl === null) return;
+  dropTargetEl.classList.remove("drop-before", "drop-after");
+  dropTargetEl = null;
+}
+
+/** ドロップ位置: タイルの左半分なら手前、右半分なら直後（グリッドは左→右・上→下の流れ） */
+function isDropAfter(el: HTMLElement, clientX: number): boolean {
+  const rect = el.getBoundingClientRect();
+  return clientX >= rect.left + rect.width / 2;
+}
+
+function wireTileDrag(el: HTMLButtonElement, projectId: string): void {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    if (e.dataTransfer === null) return;
+    draggingProjectId = projectId;
+    e.dataTransfer.setData(TILE_MIME, projectId);
+    e.dataTransfer.effectAllowed = "move";
+    el.classList.add("is-dragging");
+  });
+  el.addEventListener("dragend", () => {
+    // ドロップされなかった（隙間・枠外で離した）ときもここで片付く
+    draggingProjectId = null;
+    el.classList.remove("is-dragging");
+    clearDropMarker();
+  });
+  el.addEventListener("dragover", (e) => {
+    if (!isTileDrag(e.dataTransfer)) return; // フォルダのドロップは window 側（登録）に任せる
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer !== null) e.dataTransfer.dropEffect = "move";
+    if (draggingProjectId === projectId) {
+      clearDropMarker();
+      return;
+    }
+    const after = isDropAfter(el, e.clientX);
+    if (dropTargetEl !== el) {
+      clearDropMarker();
+      dropTargetEl = el;
+    }
+    el.classList.toggle("drop-before", !after);
+    el.classList.toggle("drop-after", after);
+  });
+  el.addEventListener("dragleave", (e) => {
+    // 子要素間の移動でも dragleave が飛ぶため、タイルの外へ出たときだけ目印を消す
+    if (e.relatedTarget instanceof Node && el.contains(e.relatedTarget)) return;
+    if (dropTargetEl === el) clearDropMarker();
+  });
+  el.addEventListener("drop", (e) => {
+    if (!isTileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const fromId = draggingProjectId ?? e.dataTransfer?.getData(TILE_MIME) ?? "";
+    const after = isDropAfter(el, e.clientX);
+    clearDropMarker();
+    draggingProjectId = null;
+    void reorderByDrop(fromId, projectId, after);
+  });
+}
+
+/** D&D の確定: 現在の並び（Snapshot.projects 順）から新しい id 順を作り main へ保存を依頼する */
+async function reorderByDrop(fromId: string, toId: string, after: boolean): Promise<void> {
+  if (snap === null || fromId === "" || fromId === toId) return;
+  const ids = snap.projects.map((p) => p.id);
+  const next = moveProjectId(ids, fromId, toId, after);
+  if (next.every((id, i) => id === ids[i])) return;
+  const result = await api.reorderProjects(next);
+  if (!result.ok) showLocalMessage(result.error ?? "並び順を変更できませんでした");
+}
+
+/* ---------------- 自動整列（260906_1 #1） ---------------- */
+
+/**
+ * 接続中のプロジェクトを先頭（左上）へ、未接続を後ろへ寄せる。グループ内の相対順は保つ。
+ * ボタン押下時に 1 回だけ行う（5 秒ごとのウィンドウ判定に追従して勝手に並び替えると目で追えなくなる）
+ */
+function autoArrange(): void {
+  if (snap === null || snap.projects.length === 0) return;
+  const s = snap;
+  const linked: Record<string, boolean> = {};
+  for (const p of s.projects) {
+    const members = s.splitSessions[p.id];
+    const states = members !== undefined && members.length >= 2 ? members.map((m) => m.state) : [s.sessions[p.id]?.state];
+    linked[p.id] = projectLinked(s.windowPresence[p.id], states);
+  }
+  const ids = s.projects.map((p) => p.id);
+  const linkedCount = ids.filter((id) => linked[id]).length;
+  const next = autoArrangeIds(ids, linked);
+  if (next.every((id, i) => id === ids[i])) {
+    showLocalMessage(`すでに整列済みです（接続中 ${linkedCount} 件が先頭）`);
+    return;
+  }
+  void (async () => {
+    const result = await api.reorderProjects(next);
+    if (result.ok) showLocalMessage(`自動整列しました: 接続中 ${linkedCount} 件を左上へ・未接続 ${ids.length - linkedCount} 件を後ろへ`);
+    else showLocalMessage(result.error ?? "整列できませんでした");
+  })();
 }
 
 /**
@@ -510,6 +628,7 @@ window.setInterval(() => {
 let dragDepth = 0;
 
 window.addEventListener("dragenter", (e) => {
+  if (isTileDrag(e.dataTransfer)) return; // タイルの並べ替え中（260906_1）は登録用オーバーレイを出さない
   e.preventDefault();
   dragDepth += 1;
   const overlay = $("#drop-overlay");
@@ -521,16 +640,19 @@ window.addEventListener("dragenter", (e) => {
   overlay.hidden = false;
 });
 window.addEventListener("dragover", (e) => {
+  if (isTileDrag(e.dataTransfer)) return; // タイル以外の場所（隙間）へは落とせない = 何も起きない
   e.preventDefault();
   // Cursor（VS Code 系）は effectAllowed=copyMove 等で渡してくるため、受け側の効果を明示して drop を確実に許可する
   if (e.dataTransfer !== null) e.dataTransfer.dropEffect = "copy";
 });
 window.addEventListener("dragleave", (e) => {
+  if (isTileDrag(e.dataTransfer)) return;
   e.preventDefault();
   dragDepth = Math.max(0, dragDepth - 1);
   if (dragDepth === 0) $("#drop-overlay").hidden = true;
 });
 window.addEventListener("drop", (e) => {
+  if (isTileDrag(e.dataTransfer)) return; // タイル上の drop は wireTileDrag が処理済み（伝播も止めている）
   e.preventDefault();
   dragDepth = 0;
   $("#drop-overlay").hidden = true;
@@ -585,6 +707,8 @@ function wireControls(): void {
   $("#btn-pick-empty").addEventListener("click", () => {
     void pickProjects();
   });
+  // 自動整列（260906_1 #1）: 接続中のタイルを左上へ
+  $("#btn-arrange").addEventListener("click", () => autoArrange());
   $("#btn-pin").addEventListener("click", () => {
     if (snap === null) return;
     void api.setPinned(!snap.pinned); // 常に手前の即時切替（REQ-07）

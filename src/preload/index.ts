@@ -17,6 +17,8 @@ const api: TerminalAppApi = {
   setCustomStatuses: (list: string[]) => ipcRenderer.invoke("set-custom-statuses", list),
   setProjectName: (id: string, name: string) => ipcRenderer.invoke("set-project-name", id, name),
   setShowUnlinked: (value: boolean) => ipcRenderer.invoke("set-show-unlinked", value),
+  // タイルの並び順（260906_1: D&D 並べ替え・自動整列）
+  reorderProjects: (ids: string[]) => ipcRenderer.invoke("reorder-projects", ids),
   setTheme: (theme: ThemeSetting) => ipcRenderer.invoke("set-theme", theme),
   setAlwaysOnTopDefault: (value: boolean) => ipcRenderer.invoke("set-aot-default", value),
   setPinned: (value: boolean) => ipcRenderer.invoke("set-pinned", value),

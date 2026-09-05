@@ -188,6 +188,11 @@ export interface TerminalAppApi {
   setProjectName(id: string, name: string): Promise<OpResult>;
   /** 未接続タイルの表示／非表示（260903_1）。config.json に保持 */
   setShowUnlinked(value: boolean): Promise<void>;
+  /**
+   * タイルの並び順を変更（260906_1: D&D 並べ替え・自動整列）。ids の順が projects.json の配列順になる。
+   * 未知の id は無視、含まれない既存プロジェクトは末尾に元の順で残る。順序が同じなら何もしない
+   */
+  reorderProjects(ids: string[]): Promise<OpResult>;
   setTheme(theme: ThemeSetting): Promise<void>;
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
