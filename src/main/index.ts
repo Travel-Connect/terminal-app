@@ -24,16 +24,25 @@ import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
-import { DISCONNECT_CHECK_INTERVAL_MS, findConcluded, findDisconnected, findResumedFromConfirm } from "./liveness-monitor";
+import {
+  DISCONNECT_CHECK_INTERVAL_MS,
+  STOPPED_RESUME_MIN_AGE_MS,
+  findConcluded,
+  findDisconnected,
+  findResumedFromConfirm,
+  findResumedFromStopped,
+  type StoppedResumeDeps,
+  type StoppedResumeHit,
+} from "./liveness-monitor";
 import { Logger } from "./logger";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
-import { classifyLiveness, readSessionRegistry, registryStatusOf } from "./session-registry";
-import { scanLiveSessions, turnEndOf } from "./session-scan";
+import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
+import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { classifyNotification, countTiles, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
@@ -155,12 +164,86 @@ let eventServer: EventServer | null = null;
 /** セッションごとに最後に通知を出した状態（260712_5）。同一状態への再遷移で通知が連発するのを防ぐ */
 const lastNotifiedState = new Map<string, SessionState>();
 
+/**
+ * Stop 受信後の前倒し判定（260907_1 R6）: sessionId → タイマー。
+ * Stop hook が block されて続行した場合、本アプリの Stop hook は同時に「完了」を送ってくる。
+ * 「完了」への遷移は即時に行い、STOP_RECHECK_DELAY_MS 後に登録簿・transcript を見て
+ * まだ作業中なら「実行中」へ戻す。完了トーストはこの判定の後に出す（誤通知の防止）
+ */
+const pendingStopChecks = new Map<string, NodeJS.Timeout>();
+/** Stop 受信 → 前倒し判定までの待ち = 登録簿が idle へ切り替わる猶予（STOPPED_RESUME_MIN_AGE_MS）＋余裕 */
+const STOP_RECHECK_DELAY_MS = STOPPED_RESUME_MIN_AGE_MS + 500;
+
+function cancelPendingStopCheck(sessionId: string): void {
+  const timer = pendingStopChecks.get(sessionId);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  pendingStopChecks.delete(sessionId);
+}
+
+function cancelAllPendingStopChecks(): void {
+  for (const timer of pendingStopChecks.values()) clearTimeout(timer);
+  pendingStopChecks.clear();
+}
+
+/** 完了・切断 → 実行中の復帰判定に渡す依存（掃引・前倒し判定で共通。260907_1） */
+function stoppedResumeDeps(registry: RegistryEntry[] | null): StoppedResumeDeps {
+  return {
+    now: () => Date.now(),
+    registryStatus: (sid) => registryStatusOf(registry, sid),
+    turnEnd: turnEndOf,
+    blockedStop: blockedStopOf,
+    activityMtimeMs,
+  };
+}
+
+/** 復帰ヒットの適用（掃引・前倒し判定の共通処理）。戻り値: 実際に「実行中」へ戻したか */
+function applyStoppedResume(hit: StoppedResumeHit): boolean {
+  const sid = hit.target.sessionId;
+  const label = hit.blockReason !== undefined ? blockReasonToWorkText(hit.blockReason) : undefined;
+  if (!stateStore.resumeFromStopped(sid, label)) return false;
+  lastNotifiedState.set(sid, "running"); // 本当の完了で再び通知できるように
+  const project = projectStore.getProject(hit.target.projectId);
+  const from = hit.target.state === "done" ? "完了" : "切断";
+  const why =
+    hit.reason === "registry"
+      ? "登録簿 status=busy（Claude Code は作業中と申告）"
+      : hit.reason === "blocked-stop"
+        ? `Stop hook が続行を指示${label !== undefined ? ` ${label}` : ""}`
+        : "切断後に transcript（本体または subagent 記録）が更新";
+  logger.info(`${from}から実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${sid}) — ${why}`);
+  return true;
+}
+
+/**
+ * Stop 受信の STOP_RECHECK_DELAY_MS 後: まだ作業中（登録簿 busy／block 痕跡）なら完了を取り消して実行中へ戻し、
+ * そうでなければここで完了トーストを出す（260907_1 R6）。同じセッションの次のイベントで取り消される
+ */
+function scheduleStopRecheck(sessionId: string, notify: boolean, project: Project | null): void {
+  cancelPendingStopCheck(sessionId);
+  const timer = setTimeout(() => {
+    pendingStopChecks.delete(sessionId);
+    const target = stateStore.stoppedSessions().find((t) => t.sessionId === sessionId && t.state === "done");
+    if (target === undefined) return; // その後のイベント・掃引で状態が変わった
+    const hits = findResumedFromStopped([target], stoppedResumeDeps(readSessionRegistry()));
+    if (hits.length > 0 && applyStoppedResume(hits[0])) {
+      broadcast();
+      return;
+    }
+    if (notify && project !== null) {
+      showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
+    }
+  }, STOP_RECHECK_DELAY_MS);
+  pendingStopChecks.set(sessionId, timer);
+}
+
 function createAppEventServer(): EventServer {
   return createEventServer({
     // デモ実行は hooks を書かず受信も不要のため空きポート（0）で listen し、
     // 実稼働インスタンス（既定 41321）と並走しても EADDRINUSE を起こさない（260712 課題C）
     port: demoMode ? 0 : projectStore.config.port,
     onEvent: (evt, receivedAt) => {
+      cancelPendingStopCheck(evt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
       const result = stateStore.applyEvent(evt, projectStore.projects);
       if (result === null) {
         // design.md 10 章: 未登録 cwd・正常 SessionEnd は破棄してログのみ（UI は変えない）
@@ -178,15 +261,13 @@ function createAppEventServer(): EventServer {
       }
       // 完了・確認待ちのトースト通知（260712_5）。状態が実際に変化したときのみ通知する
       // （同一状態への再遷移では通知しない = 過剰通知の抑制）
-      if (shouldNotify(lastNotifiedState.get(result.sessionId), result.state)) {
-        const project = projectStore.getProject(result.projectId);
-        if (project !== null) {
-          if (result.state === "done") {
-            showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
-          } else if (result.state === "confirm") {
-            showSessionToast(project, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
-          }
-        }
+      const notify = shouldNotify(lastNotifiedState.get(result.sessionId), result.state);
+      const project = projectStore.getProject(result.projectId);
+      if (result.state === "done") {
+        // 完了トーストは前倒し判定の後（最大 STOP_RECHECK_DELAY_MS 遅れ）— block された Stop で誤通知しないため（260907_1 R6）
+        scheduleStopRecheck(result.sessionId, notify, project);
+      } else if (notify && project !== null && result.state === "confirm") {
+        showSessionToast(project, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
       }
       lastNotifiedState.set(result.sessionId, result.state);
       broadcast(receivedAt);
@@ -225,6 +306,7 @@ const appRestarter = createAppRestarter({
       windowPollTimer = null;
     }
     cancelAllPendingRestores();
+    cancelAllPendingStopChecks(); // Stop 後の前倒し判定（260907_1）を残さない
     await devServers.stopAll(); // 起動した開発サーバーを残さない（260722_1）
     await (eventServer?.close() ?? Promise.resolve());
   },
@@ -363,6 +445,16 @@ function sweepLiveness(): void {
     }
   }
 
+  // (1') 完了・切断からの復帰（260907_1 R1〜R3）: Stop hook が block されて続行した／登録簿が作業中と申告している／
+  //      切断後に transcript（本体・subagent 記録）が動いた セッションを「実行中」へ戻す
+  const stoppedTargets = stateStore.stoppedSessions();
+  if (stoppedTargets.length > 0) {
+    for (const hit of findResumedFromStopped(stoppedTargets, stoppedResumeDeps(registry))) {
+      cancelPendingStopCheck(hit.target.sessionId); // 掃引が先に戻したので前倒し判定（とそのトースト）は不要
+      if (applyStoppedResume(hit)) changed = true;
+    }
+  }
+
   const targets = stateStore.runningSessions();
   if (targets.length === 0) {
     if (changed) broadcast();
@@ -389,7 +481,13 @@ function sweepLiveness(): void {
     if (windows === null) windows = listTopLevelWindows();
     return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
   };
-  const hits = findDisconnected(rest, { now: () => Date.now(), mtimeMs: statMtimeMs, windowPresent });
+  // 無更新の判定は subagent 記録も含めた最終活動時刻で行い、登録簿が busy の間は切断しない（260907_1 R4）
+  const hits = findDisconnected(rest, {
+    now: () => Date.now(),
+    mtimeMs: activityMtimeMs,
+    windowPresent,
+    registryStatus: (sid) => registryStatusOf(registry, sid),
+  });
   for (const t of hits) {
     if (!stateStore.markDisconnected(t.sessionId)) continue;
     changed = true;
@@ -1199,6 +1297,7 @@ app.on("will-quit", () => {
   if (livenessTimer !== null) clearInterval(livenessTimer);
   if (windowPollTimer !== null) clearInterval(windowPollTimer);
   cancelAllPendingRestores();
+  cancelAllPendingStopChecks();
   void devServers.stopAll(); // 開発サーバーを残さない（260722_1）
   void eventServer?.close();
   logger.info("terminal-app 終了");

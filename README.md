@@ -44,6 +44,12 @@ npm start
 - **確認待ちの見え方と復帰（260904_1 #2）**: 確認待ちのタイルは青で 1 秒周期に点滅する。完了・切断・確認待ち復帰の
   見直し（掃引）は 15 秒ごと。権限確認を許可して Claude が作業を再開した（transcript が更新された／Claude Code の
   登録簿 status が busy になった）ことを掃引で検知し、タイルは自動で「実行中」に戻る。
+- **作業中の完了・切断誤判定の防止（260907_1）**: 品質ループ等で Stop hook が block されて Claude が続行した場合や、
+  同期 fork・codex 待ちで本体 transcript が長く止まる場合でも、タイルを「実行中」に保つ（戻す）。根拠は Claude Code の
+  登録簿 status=busy（cli 起動）、transcript の block 痕跡（`stop_hook_summary.preventedContinuation`。Cursor 起動でも使える）、
+  subagent 記録（`<sessionId>/subagents/agent-*.jsonl`）の更新。Stop 受信で「完了」にした約 3.5 秒後に判定して
+  まだ作業中なら「実行中」へ戻し、完了トーストはその判定の後に出す（block された Stop で誤通知しない）。
+  登録簿が busy の間は切断判定をしない。block で戻ったタイルの作業テキストは block 理由のラベル（例「[Eval-loop iteration 1/4 | RESUME 1/3]」）。
 - **分割タイル（260904_1 #3）**: 1 つのフォルダで 2 本以上の claude が同時に動いている（Cursor の複数ターミナル等）と、
   タイルが「名前 ①」「名前 ②」（起動順）に自動で分かれ、それぞれの状態・作業テキストが見える。1 本に戻れば元の 1 タイルへ。
   生死は Claude Code 自身が書く登録簿（`%USERPROFILE%\.claude\sessions\<pid>.json`）とプロセス存在で判定するため、

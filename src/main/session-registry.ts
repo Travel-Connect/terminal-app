@@ -31,8 +31,14 @@ export interface RegistryEntry {
 
 export type Liveness = "alive" | "dead" | "unknown";
 
-/** 登録簿ディレクトリ（既定 ~/.claude/sessions） */
+/**
+ * 登録簿ディレクトリ（既定 ~/.claude/sessions）。
+ * env `TERMINAL_APP_SESSIONS_DIR` で差し替え可能（260907_1 R7。E2E が擬似登録簿で busy/idle を再現するため。
+ * TERMINAL_APP_DATA_DIR と同系の検証フラグで、実運用では未設定）
+ */
 export function registryDir(homeDir: string = os.homedir()): string {
+  const override = process.env.TERMINAL_APP_SESSIONS_DIR;
+  if (override !== undefined && override.trim() !== "") return override;
   return path.join(homeDir, ".claude", "sessions");
 }
 

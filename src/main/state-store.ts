@@ -83,6 +83,19 @@ export function extractWorkText(prompt: string | undefined): string | undefined 
 }
 
 /**
+ * Stop hook の block 理由 → タイルの作業テキスト（260907_1 R2）。
+ * eval-loop の理由文は「[Eval-loop iteration 1/4 | RESUME 1/3] The loop is mid-iteration …」の形なので、
+ * 先頭の `[...]` ラベル（78 文字以内）だけを出す。ラベルが無い・長すぎるときは 1 行目を WORK_TEXT_MAX で省略。
+ * 空・空白のみは undefined（呼び出し側は既存の作業テキストを維持）。
+ */
+export function blockReasonToWorkText(reason: string): string | undefined {
+  const label = /^\s*(\[[^\]\n]{1,78}\])/.exec(reason);
+  if (label !== null) return label[1];
+  const firstLine = reason.split(/\r?\n/).find((line) => line.trim() !== "") ?? "";
+  return extractWorkText(firstLine);
+}
+
+/**
  * Notification message の種別分類（design.md 4.3）。
  * いずれの種別でも遷移先は「確認待ち」（安全側）。分類はログ・将来の出し分け用。
  */
@@ -429,6 +442,34 @@ export class StateStore extends EventEmitter {
     rec.state = "running";
     rec.runningSince = t;
     rec.lastEventAt = t;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 完了・切断からの復帰検知の対象 = 「完了」または「切断」かつ終了済みでないセッション（260907_1） */
+  stoppedSessions(): Array<{ sessionId: string; projectId: string; state: "done" | "disconnected"; transcriptPath?: string; lastEventAt: number }> {
+    const out: Array<{ sessionId: string; projectId: string; state: "done" | "disconnected"; transcriptPath?: string; lastEventAt: number }> = [];
+    for (const rec of this.sessions.values()) {
+      if ((rec.state === "done" || rec.state === "disconnected") && rec.dead !== true) {
+        out.push({ sessionId: rec.sessionId, projectId: rec.projectId, state: rec.state, transcriptPath: rec.transcriptPath, lastEventAt: rec.lastEventAt });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 完了・切断 → 実行中（260907_1 R1〜R3）: Stop hook が block して続行した／登録簿が作業中と申告している／
+   * 切断後に transcript が動いた、ときの遷移。完了・切断以外には適用しない。経過時間の起点は検知時刻。
+   * workText を渡せば作業テキストを置き換える（block 理由のラベル。省略時は維持）。
+   */
+  resumeFromStopped(sessionId: string, workText?: string): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || (rec.state !== "done" && rec.state !== "disconnected")) return false;
+    const t = this.now();
+    rec.state = "running";
+    rec.runningSince = t;
+    rec.lastEventAt = t;
+    if (workText !== undefined) rec.workText = workText;
     this.emit("changed");
     return true;
   }

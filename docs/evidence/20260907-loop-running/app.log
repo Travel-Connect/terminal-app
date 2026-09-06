@@ -1,0 +1,28 @@
+2026-09-06T18:58:57.599Z [INFO] terminal-app 起動 (dataDir=C:\Users\hppym\AppData\Local\Temp\ta-loop-e2e-NcU5iV, demo=false)
+2026-09-06T18:58:57.611Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-loop-proj-cli-tcdE5b
+2026-09-06T18:58:57.613Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-loop-proj-cli-tcdE5b
+2026-09-06T18:58:57.614Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-loop-proj-vs-3HtodT
+2026-09-06T18:58:57.616Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-loop-proj-vs-3HtodT
+2026-09-06T18:58:57.712Z [INFO] event-server: listening on http://127.0.0.1:42199/terminal-app/event
+2026-09-06T18:58:57.728Z [INFO] ウィンドウ判定（初回）: 接続 0 / 未接続 2 [loop-cli, loop-vscode]
+2026-09-06T18:58:58.063Z [INFO] window shown (demo=false, capture=-)
+2026-09-06T18:58:59.154Z [INFO] event 受信: UserPromptSubmit → running (project=p-cli, session=e2e00001-0000-4000-8000-00000000c1cd)
+2026-09-06T18:58:59.156Z [INFO] ui-latency: 受信→描画完了 2ms (revision=2)
+2026-09-06T18:58:59.663Z [INFO] event 受信: Stop → done (project=p-cli, session=e2e00001-0000-4000-8000-00000000c1cd)
+2026-09-06T18:58:59.668Z [INFO] ui-latency: 受信→描画完了 5ms (revision=3)
+2026-09-06T18:59:03.183Z [INFO] 完了から実行中へ復帰: loop-cli (session=e2e00001-0000-4000-8000-00000000c1cd) — 登録簿 status=busy（Claude Code は作業中と申告）
+2026-09-06T18:59:04.762Z [INFO] event 受信: Stop → done (project=p-cli, session=e2e00001-0000-4000-8000-00000000c1cd)
+2026-09-06T18:59:04.767Z [INFO] ui-latency: 受信→描画完了 5ms (revision=5)
+2026-09-06T18:59:11.280Z [INFO] event 受信: UserPromptSubmit → running (project=p-vs, session=e2e00002-0000-4000-8000-0000000000e5)
+2026-09-06T18:59:11.282Z [INFO] ui-latency: 受信→描画完了 2ms (revision=6)
+2026-09-06T18:59:11.789Z [INFO] event 受信: Stop → done (project=p-vs, session=e2e00002-0000-4000-8000-0000000000e5)
+2026-09-06T18:59:11.801Z [INFO] ui-latency: 受信→描画完了 12ms (revision=7)
+2026-09-06T18:59:15.298Z [INFO] 完了から実行中へ復帰: loop-vscode (session=e2e00002-0000-4000-8000-0000000000e5) — Stop hook が続行を指示 [Eval-loop iteration 1/4 | RESUME 1/3]
+2026-09-06T18:59:16.876Z [INFO] event 受信: Stop → done (project=p-vs, session=e2e00002-0000-4000-8000-0000000000e5)
+2026-09-06T18:59:16.884Z [INFO] ui-latency: 受信→描画完了 8ms (revision=9)
+2026-09-06T18:59:23.393Z [INFO] event 受信: UserPromptSubmit → running (project=p-cli, session=e2e00001-0000-4000-8000-00000000c1cd)
+2026-09-06T18:59:23.394Z [INFO] ui-latency: 受信→描画完了 1ms (revision=10)
+2026-09-06T18:59:28.719Z [INFO] event 受信: UserPromptSubmit → running (project=p-vs, session=e2e00002-0000-4000-8000-0000000000e5)
+2026-09-06T18:59:28.734Z [INFO] ui-latency: 受信→描画完了 15ms (revision=11)
+2026-09-06T18:59:35.835Z [WARN] 切断検知: loop-vscode (session=e2e00002-0000-4000-8000-0000000000e5) — transcript 更新途絶
+2026-09-06T18:59:39.841Z [INFO] 切断から実行中へ復帰: loop-vscode (session=e2e00002-0000-4000-8000-0000000000e5) — 切断後に transcript（本体または subagent 記録）が更新

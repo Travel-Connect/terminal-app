@@ -12,6 +12,8 @@
  * - transcript パス不明・mtime 取得不可・ウィンドウ判定不能（koffi なし）は安全側 = 切断にしない。
  *   ウィンドウ判定はタイトル一致のヒューリスティックで偽陰性がある（タブ切替等）ため、
  *   短い閾値側は「両方成立」を要求して誤検知を抑える。
+ * - 登録簿 status が busy のセッションは切断しない（260907_1 R4。同期 fork・codex 待ちで本体 transcript が
+ *   長く止まっても Claude Code 自身は「作業中」と申告している）。
  */
 
 export interface SweepTarget {
@@ -22,10 +24,12 @@ export interface SweepTarget {
 
 export interface SweepDeps {
   now(): number;
-  /** transcript ファイルの mtime（epoch ms）。取得不可（不存在・権限）は null */
+  /** transcript の最終活動時刻（epoch ms）。取得不可（不存在・権限）は null。呼び出し側は subagent 記録も含めた値を渡す（260907_1） */
   mtimeMs(path: string): number | null;
   /** プロジェクトのウィンドウが存在するか。null = 判定不能（koffi 未ロード等） */
   windowPresent(projectId: string): boolean | null;
+  /** Claude Code の登録簿 status（busy / waiting / idle）。省略・undefined なら従来どおり transcript のみで判定（260907_1 R4） */
+  registryStatus?(sessionId: string): string | undefined;
 }
 
 /** 検証用の env 上書き（--demo / TERMINAL_APP_DATA_DIR と同系の検証フラグ。実運用では未設定 = 既定値） */
@@ -52,6 +56,17 @@ export const CONCLUDED_MIN_AGE_MS = envMs("TERMINAL_APP_CONCLUDED_MIN_AGE_MS", 1
 export const CONFIRM_RESUME_MARGIN_MS = envMs("TERMINAL_APP_CONFIRM_RESUME_MARGIN_MS", 3_000);
 /** 確認待ちからの復帰: 確認待ちになってからこの時間未満は判定しない（登録簿 status の更新競合を避ける。既定 5 秒） */
 export const CONFIRM_RESUME_MIN_AGE_MS = envMs("TERMINAL_APP_CONFIRM_RESUME_MIN_AGE_MS", 5_000);
+/**
+ * 完了・切断からの復帰（260907_1 R1）: Stop（最終イベント）からこの時間未満は登録簿 busy を信じない。
+ * 登録簿は Stop と同じ秒に idle へ切り替わる（2026-09-07 実測）ため、この猶予を過ぎても busy なら
+ * 「Stop hook が block して続行中」か「別の作業が続いている」。既定 3 秒
+ */
+export const STOPPED_RESUME_MIN_AGE_MS = envMs("TERMINAL_APP_STOPPED_RESUME_MIN_AGE_MS", 3_000);
+/**
+ * block 痕跡の許容ずれ（260907_1 R2）: stop_hook_summary の timestamp は hook 完了後に書かれるため本来は
+ * Stop 受信より新しいが、時計・書き込み順のずれに備えて最終イベントよりこの時間だけ前まで許容する
+ */
+export const BLOCKED_STOP_MARGIN_MS = 2_000;
 
 export interface ConfirmTarget extends SweepTarget {
   /** 確認待ちへ遷移したイベントの時刻（epoch ms） */
@@ -101,6 +116,81 @@ export function findResumedFromConfirm(targets: readonly ConfirmTarget[], deps: 
   return out;
 }
 
+/** block された Stop の痕跡（session-scan.findBlockedStop の戻り値。260907_1 R2） */
+export interface BlockedStop {
+  /** stop_hook_summary の timestamp（epoch ms） */
+  at: number;
+  /** block 理由（hook の reason。空のこともある） */
+  reason: string;
+}
+
+export interface StoppedTarget extends SweepTarget {
+  state: "done" | "disconnected";
+  /** 完了（Stop 受信）または切断判定の時刻（epoch ms） */
+  lastEventAt: number;
+}
+
+export interface StoppedResumeDeps {
+  now(): number;
+  /** Claude Code の登録簿 status（busy / waiting / idle）。無ければ undefined */
+  registryStatus(sessionId: string): string | undefined;
+  /** transcript 終端の分類（session-scan.turnEndOf を注入） */
+  turnEnd(path: string): "concluded" | "open" | "unknown";
+  /** sinceMs 以降の block 痕跡（session-scan.blockedStopOf を注入） */
+  blockedStop(path: string, sinceMs: number): BlockedStop | null;
+  /** 本体 transcript と subagent 記録の新しい方の mtime（session-scan.activityMtimeMs を注入）。取得不可は null */
+  activityMtimeMs(path: string): number | null;
+}
+
+export interface StoppedResumeHit {
+  target: StoppedTarget;
+  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / Stop hook が続行を指示 / 切断後に transcript 更新 */
+  reason: "registry" | "blocked-stop" | "transcript";
+  /** reason=blocked-stop のとき: block 理由（作業テキストのラベルに使う） */
+  blockReason?: string;
+}
+
+/**
+ * 完了・切断 → 実行中の復帰検知（260907_1 R1〜R3）。
+ *
+ * 背景: 品質ループ（eval-loop）中に (a) 司令塔が途中で応答を終える → eval-loop の Stop hook が block して続行、
+ * でも本アプリの Stop hook は同時に「完了」を送る、(b) 同期 fork や codex 待ちで本体 transcript が止まり
+ * 「切断」になる、の 2 経路で「まだ作業中なのに完了・切断のまま」になっていた（2026-09-07 実測）。
+ * 完了・切断から実行中へ戻す経路は次のプロンプト（UserPromptSubmit）しか無かった。
+ *
+ * 根拠は 3 系統（上から順に評価し、最初に成立したものを理由にする）:
+ * - R1 登録簿 status が busy、かつ transcript 終端が concluded でない（busy が古いまま残る事故への保険。
+ *   transcript 不明・unknown は busy を信じる）。最終イベントから STOPPED_RESUME_MIN_AGE_MS 未満は判定しない
+ * - R2 transcript に最終イベント−BLOCKED_STOP_MARGIN_MS 以降の block 痕跡（preventedContinuation=true）がある。
+ *   登録簿 status の無い Cursor 起動でも使える
+ * - R3 切断中のセッションで、本体または subagent 記録が切断判定より後に更新された。
+ *   完了（done）には適用しない — Stop の後にも stop_hook_summary / turn_duration / メタが書かれるため
+ */
+export function findResumedFromStopped(targets: readonly StoppedTarget[], deps: StoppedResumeDeps): StoppedResumeHit[] {
+  const out: StoppedResumeHit[] = [];
+  const now = deps.now();
+  for (const t of targets) {
+    if (now - t.lastEventAt < STOPPED_RESUME_MIN_AGE_MS) continue;
+    if (deps.registryStatus(t.sessionId) === "busy") {
+      if (t.transcriptPath === undefined || deps.turnEnd(t.transcriptPath) !== "concluded") {
+        out.push({ target: t, reason: "registry" });
+        continue;
+      }
+    }
+    if (t.transcriptPath === undefined) continue;
+    const blocked = deps.blockedStop(t.transcriptPath, t.lastEventAt - BLOCKED_STOP_MARGIN_MS);
+    if (blocked !== null) {
+      out.push({ target: t, reason: "blocked-stop", blockReason: blocked.reason });
+      continue;
+    }
+    if (t.state === "disconnected") {
+      const m = deps.activityMtimeMs(t.transcriptPath);
+      if (m !== null && m > t.lastEventAt) out.push({ target: t, reason: "transcript" });
+    }
+  }
+  return out;
+}
+
 export interface ConcludedSweepDeps {
   now(): number;
   /** transcript ファイルの mtime（epoch ms）。取得不可（不存在・権限）は null */
@@ -138,6 +228,7 @@ export function findDisconnected(targets: readonly SweepTarget[], deps: SweepDep
   const out: SweepTarget[] = [];
   for (const t of targets) {
     if (t.transcriptPath === undefined) continue; // 実データが無ければ判定しない（安全側）
+    if (deps.registryStatus?.(t.sessionId) === "busy") continue; // 登録簿が作業中と申告している間は切断しない（260907_1 R4）
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue; // stat 失敗（消失・権限）も安全側 — 一時的な失敗で切断を誤宣言しない
     const age = deps.now() - mtime;

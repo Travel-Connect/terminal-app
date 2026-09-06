@@ -11,7 +11,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { TRANSCRIPT_STALE_HARD_MS } from "./liveness-monitor";
+import { TRANSCRIPT_STALE_HARD_MS, type BlockedStop } from "./liveness-monitor";
 import { extractWorkText, normalizePath } from "./state-store";
 
 /**
@@ -76,26 +76,95 @@ function firstTextOf(rec: Record<string, unknown>): string | undefined {
  * - 進行中: user(tool_result) / assistant が終端側に来る
  */
 export function classifyTurnEnd(records: ReadonlyArray<Record<string, unknown>>): TurnEndState {
+  let sawTurnDuration = false;
   for (const rec of records) {
     const type = rec.type;
     if (type === "system") {
       const sub = (rec as { subtype?: unknown }).subtype;
-      if (sub === "stop_hook_summary" || sub === "turn_duration") return "concluded";
+      if (sub === "stop_hook_summary") {
+        // 260907_1 R5: Stop hook が {"decision":"block"} を返した（preventedContinuation=true。2026-09-07 実測の
+        // フィールド）なら Claude はこの直後に続行する = ターン継続。通常の Stop（false・旧形状で欠落）は完了
+        return (rec as { preventedContinuation?: unknown }).preventedContinuation === true ? "open" : "concluded";
+      }
+      if (sub === "turn_duration") {
+        // turn_duration 単独では決めない — 直後（古い側）の stop_hook_summary が block かどうかで結果が変わる。
+        // summary が書かれない環境（Stop hook 未設定）向けに、次の user/assistant で concluded に倒す
+        sawTurnDuration = true;
+      }
       continue; // local_command 等の system メタはスキップ
     }
     if (type === "user") {
+      if (sawTurnDuration) return "concluded";
       const text = firstTextOf(rec);
       if (text !== undefined && text.trim().startsWith(INTERRUPT_MARKER)) return "concluded";
       return "open"; // プロンプト・tool_result はターン開始直後/進行中
     }
-    if (type === "assistant") return "open"; // 生成直後・ツール実行直前（完了なら直後に system が続く）
+    if (type === "assistant") return sawTurnDuration ? "concluded" : "open"; // 生成直後・ツール実行直前（完了なら直後に system が続く）
   }
-  return "unknown";
+  return sawTurnDuration ? "concluded" : "unknown";
 }
 
 /** ファイルパスから終端分類する（掃引用。読めなければ unknown = 安全側） */
 export function turnEndOf(filePath: string): TurnEndState {
   return classifyTurnEnd(tailRecords(filePath));
+}
+
+/**
+ * block された Stop の痕跡（260907_1 R2）。入力は「新しい順」のレコード列。
+ * 最新の stop_hook_summary が preventedContinuation=true かつ timestamp が sinceMs 以降なら、その時刻と
+ * stopReason（block 理由 = 例「[Eval-loop iteration 1/4 | RESUME 1/3] …」）を返す。
+ * 最新の summary が通常の Stop なら、それより古い block があっても null（前のターンの痕跡を拾わない）。
+ * timestamp が無い・読めない block も null（安全側 = 復帰させない）。
+ */
+export function findBlockedStop(records: ReadonlyArray<Record<string, unknown>>, sinceMs: number): BlockedStop | null {
+  for (const rec of records) {
+    if (rec.type !== "system" || (rec as { subtype?: unknown }).subtype !== "stop_hook_summary") continue;
+    if ((rec as { preventedContinuation?: unknown }).preventedContinuation !== true) return null;
+    const ts = typeof rec.timestamp === "string" ? Date.parse(rec.timestamp) : Number.NaN;
+    if (!Number.isFinite(ts) || ts < sinceMs) return null;
+    const reason = (rec as { stopReason?: unknown }).stopReason;
+    return { at: ts, reason: typeof reason === "string" ? reason : "" };
+  }
+  return null;
+}
+
+/** ファイルパスから block 痕跡を探す（掃引・Stop 後の前倒し判定用。読めなければ null） */
+export function blockedStopOf(filePath: string, sinceMs: number): BlockedStop | null {
+  return findBlockedStop(tailRecords(filePath), sinceMs);
+}
+
+/**
+ * セッションの「最後に活動した時刻」（260907_1 R3/R4）= 本体 transcript と subagent 記録の新しい方の mtime。
+ * 同期 fork（background:false の Skill）の間、本体 <sessionId>.jsonl は更新されず
+ * <dir>/<sessionId>/subagents/agent-*.jsonl だけが書かれる（2026-09-07 Monthly-report で実測）ため、
+ * 本体 mtime だけで無更新を判定すると「切断」に誤判定する。
+ * 本体が無い（stat 失敗）ときは null（従来どおり判定しない）。subagents の .jsonl 以外（meta.json）は見ない。
+ */
+export function activityMtimeMs(transcriptPath: string): number | null {
+  let latest: number;
+  try {
+    latest = fs.statSync(transcriptPath).mtimeMs;
+  } catch {
+    return null;
+  }
+  const base = transcriptPath.endsWith(".jsonl") ? transcriptPath.slice(0, -".jsonl".length) : transcriptPath;
+  const subDir = path.join(base, "subagents");
+  let names: string[];
+  try {
+    names = fs.readdirSync(subDir);
+  } catch {
+    return latest; // subagent 記録なし
+  }
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    try {
+      const m = fs.statSync(path.join(subDir, name)).mtimeMs;
+      if (m > latest) latest = m;
+    } catch {
+      /* 個別の stat 失敗は無視 */
+    }
+  }
+  return latest;
 }
 
 export function mungeProjectPath(projectPath: string): string {

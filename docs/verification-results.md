@@ -195,3 +195,48 @@ clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
 
 - 6 章 #2（実マウスでの D&D 登録）・#6（呼吸発光の動的な見え方の目視）・#13（テーマのモック比較目視）
 - OPEN-03（claude プロセス強制終了時の発火実測）は引き続き未実施（受け口は実装済み）
+
+## 8. 追記: 260907_1 作業中の完了・切断誤判定の防止（V-22。証跡 = `docs/evidence/20260907-loop-running/`）
+
+### 8.1 背景の実測（2026-09-07 03:00〜03:35 JST。実稼働アプリの app.log と `~/.claude/sessions` の突合）
+
+- Monthly-report の品質ループ: 03:06 UserPromptSubmit → 実行中、03:12 generator の同期 fork 開始で本体 transcript の更新が停止、
+  03:27:31 と 03:28:16 に「切断検知」。その間、登録簿 status は busy のまま、fork の記録
+  `<sessionId>/subagents/agent-a9ea20283d12c6e54.jsonl` は 03:32 時点でも更新が続いていた（= 誤判定）。
+- 登録簿 status の切替: Stop と同じ秒に idle（product-register 00:13:16 / rakuten 00:27:34）、Esc 割り込みでも即 idle
+  （pad-python 22:58:08。終了検知より 14 秒早い）、権限確認は Notification より数秒早く waiting。
+- block された Stop の痕跡: 対話 transcript の `system{stop_hook_summary}` に `preventedContinuation` フィールドがある
+  （通常の Stop は false）。`claude -p` の transcript には summary 自体が書かれない。
+
+### 8.2 自動テスト（TDD。先に RED を確認）
+
+- 新規 4 ファイル 49 件（`tests/session-scan-blocked-stop.test.ts` 18 件 / `tests/liveness-monitor-stopped-resume.test.ts` 20 件 /
+  `tests/state-store-stopped-resume.test.ts` 8 件 / `tests/session-registry-env.test.ts` 3 件）。実装前: 42 件 FAIL / 7 件 PASS（既存挙動）→ 実装後: 全件 PASS。
+- `npm test`: **50 ファイル / 443 テスト全件 green**（既存テスト無改変）。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+
+### 8.3 E2E（`node scripts/verify-loop-running-e2e.mjs docs/evidence/20260907-loop-running`。24 項目すべて OK）
+
+専用ポート 42199・一時 dataDir・擬似登録簿（`TERMINAL_APP_SESSIONS_DIR`。pid は検証スクリプト自身）・掃引 2 秒・切断閾値 20 秒。
+
+| シナリオ | 結果 | 証跡 |
+|----------|------|------|
+| (a) 登録簿 busy のまま Stop → 0.5 秒後は「完了」→ 4.5 秒後に「実行中」へ戻る（ログ「完了から実行中へ復帰 … 登録簿 status=busy」） | OK | `01-cli-resumed-from-done.png` / app.log 18:58:59〜18:59:03Z |
+| (a) 登録簿 idle にして Stop → 6.5 秒後も「完了」のまま | OK | app.log 18:59:04Z 以降に復帰なし |
+| (b) status 無し（Cursor 相当）で Stop → transcript に block 痕跡を追記 → 「実行中」＋作業テキスト `[Eval-loop iteration 1/4 \| RESUME 1/3]` | OK | `02-vscode-resumed-by-blocked-stop.png` / app.log 18:59:15Z |
+| (b) 正常終端（summary false ＋ turn_duration）を追記して Stop → 「完了」のまま | OK | app.log 18:59:16Z 以降に復帰なし |
+| (c) 本体 transcript を 60 秒前にしても登録簿 busy なら切断しない | OK | 5 秒後も running |
+| (c) status 無しでも subagent 記録が新しければ切断しない | OK | 5 秒後も running |
+| (c) 本体・subagent とも古いと切断 → subagent 記録の追記で「実行中」へ戻る | OK | `03-vscode-disconnected.png` / `04-vscode-resumed-from-disconnected.png` / app.log 18:59:35Z 切断 → 18:59:39Z 復帰 |
+
+初回実行は切断閾値を 4 秒にしていたため (b)(c) の待ち時間中に誤切断して 3 件 NG になった（アプリ側の判定は正しく動作。
+ログに復帰の記録あり）。閾値を 20 秒にし、切断させたい場面では mtime を 60 秒前に設定する方式へ修正して全件 OK。
+
+### 8.4 稼働アプリへの反映
+
+- 旧プロセス（PID 89908）を `taskkill //PID` で終了（19:00:05Z「terminal-app 終了」）→ 新ビルドを起動（19:00:29Z「terminal-app 起動」、PID 100028）。
+- 再起動でセッション表示は揮発するため、実ループでの復帰は次の Stop / 切断以降のログで確認する（本作業時点では未観測）。
+
+### 8.5 手動枠に残る項目
+
+- 実ループ（対話セッション）で block された Stop の transcript 形状（`preventedContinuation:true` の実物）は本機にまだ無く、
+  フィールド定義と E2E の擬似レコードで確認した。実物が出たら `classifyTurnEnd` の分類を再確認する。
