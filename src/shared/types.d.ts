@@ -90,6 +90,11 @@ export interface SessionView {
    */
   statsText?: string;
   /**
+   * 品質ループ（eval-loop）の進捗バッジ文言（260907_2）。例「ループ 2/4・codex 実装中 1分・最高 78点」、
+   * 終了後 30 分は「ループ終了・合格 92点」。eval-loop の registry / state.json 由来。無ければ undefined（非表示）。
+   */
+  loopText?: string;
+  /**
    * このセッションを最初に観測した時刻（epoch ms。260904_1 #3）。
    * 同じプロジェクトで複数セッションが並行するときの分割タイルの並び順（起動順）に使う
    */

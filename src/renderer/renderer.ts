@@ -143,7 +143,15 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const badge = document.createElement("span");
   badge.className = "tile-badge";
   badge.hidden = true;
-  head.append(nameRow, badge);
+  // ループ進捗バッジ（260907_2）: 手動バッジと同じ行に並べる。両方無いときは行ごと隠してレイアウトを崩さない
+  const loop = document.createElement("span");
+  loop.className = "tile-loop";
+  loop.hidden = true;
+  const badgeRow = document.createElement("span");
+  badgeRow.className = "tile-badge-row";
+  badgeRow.hidden = true;
+  badgeRow.append(badge, loop);
+  head.append(nameRow, badgeRow);
   const center = document.createElement("span");
   center.className = "tile-center";
   const spinner = document.createElement("span");
@@ -349,6 +357,16 @@ function renderGrid(): void {
     const badge = project.customStatus ?? "";
     if (badgeEl.textContent !== badge) badgeEl.textContent = badge;
     badgeEl.hidden = badge === "";
+    // ループ進捗バッジ（260907_2）。eval-loop の state が無いセッション・待機タイルは非表示
+    const loopEl = el.querySelector(".tile-loop") as HTMLElement;
+    const loop = session?.loopText ?? "";
+    if (loopEl.textContent !== loop) {
+      loopEl.textContent = loop;
+      loopEl.title = loop; // 省略（…）されても hover で全文が読める
+    }
+    loopEl.hidden = loop === "";
+    const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
+    badgeRowEl.hidden = badge === "" && loop === "";
     const icon = STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）

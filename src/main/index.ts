@@ -22,6 +22,7 @@ import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
+import { evalLoopDir, loopTextForSessions } from "./eval-loop-status";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
 import {
@@ -371,6 +372,46 @@ function showDisconnectToast(project: Project | null, projectName: string): void
   );
 }
 
+/** ループ進捗バッジを出しているセッション（260907_2。出現・消滅のログ用） */
+const loopBadgeShown = new Set<string>();
+
+/**
+ * ループ進捗バッジ（260907_2）: eval-loop の registry / state.json / codex ジョブから各セッションの文言を作り
+ * StateStore に載せる。戻り値: 表示が変わったか。読み取りの失敗は警告ログのみで掃引を止めない
+ */
+function updateLoopTexts(): boolean {
+  const ids = stateStore.sessionIds();
+  if (ids.length === 0) return false;
+  let texts: Map<string, string>;
+  try {
+    texts = loopTextForSessions(ids, { evalLoopDir: evalLoopDir(), now: Date.now() });
+  } catch (e) {
+    logger.warn(`ループ進捗の読み取りに失敗（前回値を維持）: ${String(e)}`);
+    return false;
+  }
+  let changed = false;
+  for (const sid of ids) {
+    const text = texts.get(sid);
+    if (!stateStore.applyLoopText(sid, text)) continue;
+    changed = true;
+    const shown = loopBadgeShown.has(sid);
+    if (text !== undefined && !shown) {
+      loopBadgeShown.add(sid);
+      const view = stateStore.displaySessions(projectStore.projects);
+      const pid = Object.keys(view).find((k) => view[k].sessionId === sid);
+      const name = pid !== undefined ? (projectStore.getProject(pid)?.name ?? pid) : sid;
+      logger.info(`ループ進捗バッジ 表示: ${name} (session=${sid}) — ${text}`);
+    } else if (text === undefined && shown) {
+      loopBadgeShown.delete(sid);
+      const view = stateStore.displaySessions(projectStore.projects);
+      const pid = Object.keys(view).find((k) => view[k].sessionId === sid);
+      const name = pid !== undefined ? (projectStore.getProject(pid)?.name ?? pid) : sid;
+      logger.info(`ループ進捗バッジ 消滅: ${name} (session=${sid})`);
+    }
+  }
+  return changed;
+}
+
 /**
  * 登録簿で「終了」を何回連続で観測したら確定させるか（260904_1 #3）。
  * 登録簿ファイルは status 変化のたびに書き換わるため、書き込み途中を読むと 1 回だけ「無い」に見える
@@ -454,6 +495,10 @@ function sweepLiveness(): void {
       if (applyStoppedResume(hit)) changed = true;
     }
   }
+
+  // (1'') ループ進捗バッジ（260907_2）: eval-loop の registry / state.json から各セッションの進捗文言を更新する。
+  //       状態遷移には触れない（statusLine 転送と同じ扱い）。出現・消滅だけログに残す（経過分の変化は残さない）
+  if (updateLoopTexts()) changed = true;
 
   const targets = stateStore.runningSessions();
   if (targets.length === 0) {

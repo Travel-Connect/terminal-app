@@ -93,3 +93,28 @@ block された Stop は対話 transcript に `preventedContinuation:true` と�
 - `npx vitest run tests/session-scan-blocked-stop.test.ts tests/liveness-monitor-stopped-resume.test.ts tests/state-store-stopped-resume.test.ts tests/session-registry-env.test.ts`
 - `npm run typecheck && npm run lint && npm test && npm run build`
 - `node scripts/verify-loop-running-e2e.mjs docs/evidence/20260907-loop-running`
+
+## 追加: 260907_2 ループ進捗バッジ（提案時の案 C。2026-09-07 ユーザー指示「ループ進捗バッジを追加して」）
+
+| # | 仕様 |
+|---|------|
+| B1 | タイル名の下（手動バッジと同じ行）に「ループ N/M・<段階>」を出す。N は iteration+1、段階は phase（計画中／実装中／採点中／判定中）。codex ジョブ走行中は「codex 実装中／採点中 <経過分>分」に置き換える。2 周目以降で best_score があれば「・最高 NN点」 |
+| B2 | 終了後は ended_at から 30 分だけ「ループ終了・<理由> <点数>点」。理由の日本語化は既知のものだけ。never_started は出さない |
+| B3 | 情報源は `registry/sessions/<sessionId>` と `registry/agents/*`（state の session_id で対応付け）。同じセッションに進行中が複数なら先頭＋「（他 N 本）」 |
+| B4 | 15 秒の掃引で更新（`StateStore.applyLoopText`。状態遷移に触れない）。env `TERMINAL_APP_EVAL_LOOP_DIR` で参照先を差し替え可能 |
+
+### Task 9: eval-loop-status（純関数＋ファイル読取）
+- Test（新規）: `tests/eval-loop-status.test.ts` — parseLoopState / describeLoop / readRunningJob / loopTextForSessions / evalLoopDir
+- 実装: `src/main/eval-loop-status.ts`
+
+### Task 10: StateStore.applyLoopText と view
+- Test（新規）: `tests/state-store-loop-text.test.ts`
+- 実装: `src/main/state-store.ts`（loopText）、`src/shared/types.d.ts`
+
+### Task 11: 配線と描画
+- `src/main/index.ts`（掃引で loopTextForSessions → applyLoopText。表示の出現・消滅をログ）
+- `src/renderer/renderer.ts` / `styles.css`（`.tile-badge-row` に手動バッジと `.tile-loop` を並べる。両方無ければ行ごと非表示）
+
+### Task 12: E2E とドキュメント
+- `scripts/verify-loop-badge-e2e.mjs` → `docs/evidence/20260907-loop-badge/`（擬似 eval-loop ディレクトリ・codex ジョブ・fork ループ・終了表示・期限切れ）
+- spec（REQ-18 / AC-22）・design（5.2, 6.2）・verification（V-23）・verification-results（8.6）・README・完了報告・コミット・push

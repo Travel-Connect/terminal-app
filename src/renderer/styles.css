@@ -230,6 +230,26 @@ body {
   text-overflow: ellipsis;
 }
 
+/* 手動バッジとループ進捗バッジの行（260907_2）。両方非表示のときは行ごと hidden */
+.tile-badge-row { display: flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; }
+
+/* ループ進捗バッジ（260907_2）: eval-loop の state 由来。アクセント色で手動バッジ（灰色）と区別する */
+.tile-loop {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: rgba(96, 165, 250, 0.14);
+  color: var(--accent);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tile-center { display: flex; align-items: center; gap: 6px; min-height: 20px; max-width: 100%; }
 
 /* 現在の作業テキスト（260712 課題B: ターミナルのオレンジ表示に相当する実データ = 最新 prompt）。

@@ -50,6 +50,12 @@ npm start
   subagent 記録（`<sessionId>/subagents/agent-*.jsonl`）の更新。Stop 受信で「完了」にした約 3.5 秒後に判定して
   まだ作業中なら「実行中」へ戻し、完了トーストはその判定の後に出す（block された Stop で誤通知しない）。
   登録簿が busy の間は切断判定をしない。block で戻ったタイルの作業テキストは block 理由のラベル（例「[Eval-loop iteration 1/4 | RESUME 1/3]」）。
+- **ループ進捗バッジ（260907_2）**: 品質ループ（eval-loop）が動いているセッションのタイルには、名前の下に
+  「ループ 2/4・codex 実装中 1分・最高 78点」のような青いバッジが出る（周回数は 1 始まり。段階は 計画中／実装中／採点中／判定中、
+  codex ジョブが走っていればその役割と経過分。最高点は 2 周目以降）。ループが終わると「ループ終了・合格 92点」
+  （上限到達／停止／時間切れ／停滞で停止／採点不能）を 30 分間だけ表示する。情報源は `%USERPROFILE%\.claude\eval-loop\registry\`
+  （sessions / agents）から辿る state.json と `jobs/iter-NNN-<role>/` の heartbeat。15 秒ごとの掃引で更新。
+  fork ループ（`registry/agents`）も state の session_id で対応付く。env `TERMINAL_APP_EVAL_LOOP_DIR` で参照先を差し替え可能（検証用）。
 - **分割タイル（260904_1 #3）**: 1 つのフォルダで 2 本以上の claude が同時に動いている（Cursor の複数ターミナル等）と、
   タイルが「名前 ①」「名前 ②」（起動順）に自動で分かれ、それぞれの状態・作業テキストが見える。1 本に戻れば元の 1 タイルへ。
   生死は Claude Code 自身が書く登録簿（`%USERPROFILE%\.claude\sessions\<pid>.json`）とプロセス存在で判定するため、

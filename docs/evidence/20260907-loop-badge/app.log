@@ -1,0 +1,19 @@
+2026-09-06T19:17:29.763Z [INFO] terminal-app 起動 (dataDir=C:\Users\hppym\AppData\Local\Temp\ta-badge-e2e-zkhaX2, demo=false)
+2026-09-06T19:17:29.775Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-a-71mvjG
+2026-09-06T19:17:29.784Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-a-71mvjG
+2026-09-06T19:17:29.785Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-b-E4bax2
+2026-09-06T19:17:29.787Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-b-E4bax2
+2026-09-06T19:17:29.788Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-c-r1phOd
+2026-09-06T19:17:29.789Z [INFO] statusLine 転送を追補: C:\Users\hppym\AppData\Local\Temp\ta-badge-proj-c-r1phOd
+2026-09-06T19:17:29.835Z [INFO] event-server: listening on http://127.0.0.1:42201/terminal-app/event
+2026-09-06T19:17:29.848Z [INFO] ウィンドウ判定（初回）: 接続 0 / 未接続 3 [loop-a, loop-b, loop-c]
+2026-09-06T19:17:30.109Z [INFO] window shown (demo=false, capture=-)
+2026-09-06T19:17:31.357Z [INFO] event 受信: UserPromptSubmit → running (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-06T19:17:31.359Z [INFO] ui-latency: 受信→描画完了 2ms (revision=2)
+2026-09-06T19:17:31.362Z [INFO] event 受信: UserPromptSubmit → running (project=p-b, session=e2e0000b-0000-4000-8000-000000000002)
+2026-09-06T19:17:31.365Z [INFO] event 受信: UserPromptSubmit → running (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-06T19:17:31.374Z [INFO] ui-latency: 受信→描画完了 13ms (revision=3)
+2026-09-06T19:17:31.374Z [INFO] ui-latency: 受信→描画完了 9ms (revision=4)
+2026-09-06T19:17:31.885Z [INFO] ループ進捗バッジ 表示: loop-a (session=e2e0000a-0000-4000-8000-000000000001) — ループ 2/4・codex 実装中 1分・最高 78点
+2026-09-06T19:17:31.886Z [INFO] ループ進捗バッジ 表示: loop-b (session=e2e0000b-0000-4000-8000-000000000002) — ループ 1/4・採点中
+2026-09-06T19:17:39.874Z [INFO] ループ進捗バッジ 消滅: loop-b (session=e2e0000b-0000-4000-8000-000000000002)

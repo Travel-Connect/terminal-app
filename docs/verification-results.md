@@ -240,3 +240,25 @@ clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
 
 - 実ループ（対話セッション）で block された Stop の transcript 形状（`preventedContinuation:true` の実物）は本機にまだ無く、
   フィールド定義と E2E の擬似レコードで確認した。実物が出たら `classifyTurnEnd` の分類を再確認する。
+
+### 8.6 追記: 260907_2 ループ進捗バッジ（V-23。証跡 = `docs/evidence/20260907-loop-badge/`）
+
+- 自動テスト（TDD。先に RED を確認）: 新規 2 ファイル 19 件（`tests/eval-loop-status.test.ts` 16 件 / `tests/state-store-loop-text.test.ts` 3 件）。
+  `npm test`: **52 ファイル / 462 テスト全件 green**（既存テスト無改変）。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E（`node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260907-loop-badge`。13 項目すべて OK）: 擬似 eval-loop ディレクトリ
+  （`TERMINAL_APP_EVAL_LOOP_DIR`）に v3 形式の state.json と codex ジョブ（heartbeat・started_at）を置き、専用インスタンスに実 hook 形式の
+  UserPromptSubmit を注入。
+
+| シナリオ | 結果 | 証跡 |
+|----------|------|------|
+| (a) `registry/sessions/<sessionId>` のループ（2 周目・best_score 78・generator ジョブ走行中）→ 「ループ 2/4・codex 実装中 1分・最高 78点」 | OK | `01-badges.png` / app.log「ループ進捗バッジ 表示」 |
+| (b) `registry/agents/<agentId>` の fork ループ（state の session_id で対応付け）→ 「ループ 1/4・採点中」 | OK | `01-badges.png` |
+| (c) ループの無いセッションはバッジ無し・行ごと非表示（レイアウト不変） | OK | `01-badges.png` の loop-c |
+| (d) heartbeat が 30 秒超で古くなる → 「ループ 2/4・実装中・最高 78点」（codex 表示が消える） | OK | 掃引 1 回で反映 |
+| (e) 終了（threshold_met・92 点）→ 「ループ終了・合格 92点」／31 分前に終わった fork ループは消える | OK | `02-ended.png` / app.log「ループ進捗バッジ 消滅」 |
+
+- 回帰: `node scripts/verify-split-blink-e2e.mjs`（260904_1。バッジが名前の下の行にあること等 8 項目）は全件 OK のまま
+  （手動バッジをループバッジと同じ `.tile-badge-row` に移しても位置・表示は変わらない）。
+- 画像の目視: バッジはアクセント色（青）のピル。長い文言はタイル幅で「…」省略され、hover の title で全文が読める。
+- 稼働アプリへの反映: 旧プロセス（PID 100028）を終了 → 新ビルドを起動（19:18:58Z「terminal-app 起動」、PID 33812）。
+  実ループの Monthly-report（registry/sessions に state あり）は再起動で表示が揮発するため、次の hook イベント以降にバッジが載る。

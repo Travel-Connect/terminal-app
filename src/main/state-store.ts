@@ -173,6 +173,8 @@ interface SessionRec {
    * 表示状態（完了・確認待ち等）は残すが、分割タイルの対象から外れ、表示選定では生存セッションに劣後する
    */
   dead?: boolean;
+  /** eval-loop の進捗バッジ文言（260907_2。eval-loop-status.loopTextForSessions 由来。無ければ非表示） */
+  loopText?: string;
 }
 
 /**
@@ -226,6 +228,7 @@ function toView(rec: SessionRec): SessionView {
   if (rec.lastMessage !== undefined) view.lastMessage = rec.lastMessage;
   if (rec.workText !== undefined) view.workText = rec.workText;
   if (rec.statsText !== undefined) view.statsText = rec.statsText;
+  if (rec.loopText !== undefined) view.loopText = rec.loopText;
   return view;
 }
 
@@ -567,6 +570,20 @@ export class StateStore extends EventEmitter {
     if (rec === undefined || statsText === undefined) return false;
     if (rec.statsText === statsText) return false;
     rec.statsText = statsText;
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * ループ進捗バッジの文言を更新する（260907_2）。applyStatusStats と同じく状態遷移・lastEventAt には触れない。
+   * undefined で消す（ループ終了から 30 分で消えるため）。未知のセッションは破棄。
+   * 戻り値: 表示値が実際に変わったとき true（呼び出し側の broadcast 抑制用）
+   */
+  applyLoopText(sessionId: string, text: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.loopText === text) return false;
+    if (text === undefined) delete rec.loopText;
+    else rec.loopText = text;
     this.emit("changed");
     return true;
   }

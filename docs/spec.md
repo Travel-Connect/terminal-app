@@ -81,6 +81,7 @@ Claude Code CLI を約 6 プロジェクト並行で稼働させており、完�
 | REQ-15 | must | タイルをドラッグ&ドロップで並べ替えられ、並び順はアプリ再起動後も保持される（260906_1 #2） | AC-19 |
 | REQ-16 | must | タイトルバーの「自動整列」で、接続中（対象アプリのウィンドウがある、または実行中・確認待ち）のタイルを先頭（左上）へ、未接続を後ろへ寄せる。各グループ内の相対順は維持する（260906_1 #1） | AC-20 |
 | REQ-17 | must | Claude がまだ作業中（Stop hook が block されて続行した／同期 fork・codex 待ちで本体 transcript が止まっている）なら、タイルを「完了」「切断」にせず「実行中」に保つ（戻す）。根拠は Claude Code の登録簿 status=busy、transcript の block 痕跡、subagent 記録の更新（260907_1） | AC-21 |
+| REQ-18 | must | タイルに品質ループ（eval-loop）の進捗バッジを出す（例「ループ 2/4・codex 実装中 1分・最高 78点」。終了後 30 分は「ループ終了・合格 92点」）。情報源は eval-loop の registry と state.json、codex ジョブの heartbeat（260907_2） | AC-22 |
 
 ## 5. データ・業務ルール
 
