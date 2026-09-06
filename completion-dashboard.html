@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>terminal-app 260906_1（整列ボタン・D&amp;D 並べ替え・自動整列） — 作業完了ダッシュボード</title>
-<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-06T06:13:05+0900","subject":"terminal-app 260906_1（整列ボタン・D&D 並べ替え・自動整列）","state":"要確認","score":88,"open_tasks":3,"blockers":0} -->
+<title>terminal-app 260907_1（ループ・codex 作業中を「実行中」として扱う） — 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-07T04:01:15+0900","subject":"terminal-app 260907_1（ループ・codex 作業中を「実行中」として扱う）","state":"要確認","score":88,"open_tasks":2,"blockers":0} -->
 <style>
   :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
           --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
@@ -69,20 +69,20 @@
 <main>
   <header>
     <h1>作業完了ダッシュボード</h1>
-    <div class="meta">作成日時: 2026-09-06 06:13 / 対象: terminal-app 260906_1（整列ボタン・D&amp;D 並べ替え・自動整列） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
-      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 99bfc81（今回の変更は未コミット）</div>
+    <div class="meta">作成日時: 2026-09-07 04:01 / 対象: terminal-app 260907_1（ループ・codex 作業中を「実行中」として扱う） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 9855b19（実装分。この報告書は別コミット）</div>
   </header>
 
   <section class="card" id="sec-0">
     <h2>0. 3秒サマリー</h2>
     <div class="summary-list">
       <div class="summary-item"><strong>結論</strong>
-        <span class="status warn">要確認</span><p>整列ボタン（#1）・タイルのドラッグ&amp;ドロップ並べ替え（#2）・自動整列（接続中を左上へ）の3点を実装し、自動テストと画面操作の自動確認（E2Eテスト）をすべて通しました。稼働中のアプリも再起動して反映済みです。解釈が分かれる2点を仮定で進めたので、実際に触って確認してください。</p></div>
+        <span class="status warn">要確認</span><p>実装・自動テスト・実画面での確認・稼働アプリへの反映まで終わりました。品質ループ（AIが実装と採点を繰り返す仕組み。eval-loop）や codex が作業中の間、タイルは「実行中」に保たれます。実際のループでの効き目だけ、次回のループで見てください。</p></div>
       <div class="summary-item"><strong>あなたの対応</strong>
-        <span class="status bad">必要</span>
-        <p>再起動済みの terminal-app で右上の整列ボタン（フォルダ追加ボタンの右隣）を押し、接続中のタイルが左上に来るか確認してください（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
+        <span class="status warn">後でよい</span>
+        <p>次にループを回したとき、タイルが「完了」「切断」のまま止まらないかを見る（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
       <div class="summary-item"><strong>作業を止めている問題（ブロッカー）</strong>
-        <span class="status ok">該当なし</span><p>失敗した検証はありません。変更の保存記録（commit）だけ指示待ちで未実施です。</p></div>
+        <span class="status ok">該当なし</span><p>作業を止める問題はありません。</p></div>
     </div>
   </section>
 
@@ -92,15 +92,15 @@
       <div class="card span-3"><h3>完了状態</h3>
         <p><span class="status warn">要確認</span></p></div>
       <div class="card span-3"><h3>報告の確かさ</h3>
-        <p><span class="status ok">高</span></p><p class="muted">単体テスト394件・型チェック・Lint・ビルド・E2Eテスト（20項目）をすべて実行して結果を確認済み。実アプリでの人の手によるマウス操作だけ未実施</p></div>
+        <p><span class="status warn">中</span></p><p class="muted">自動テスト 443 件と実画面の動作確認 24 項目はすべて成功。ただし「実際のループで Stop が止められて続行した場面」は本機でまだ起きておらず、擬似データでの確認です。</p></div>
       <div class="card span-3"><h3>自己採点</h3>
         <div class="score">88<small>/100</small></div></div>
       <div class="card span-3"><h3>情報の新しさ</h3>
-        <p>作成 2026-09-06 06:13。E2Eテスト最終実行 06:11、稼働アプリ再起動 06:12（起動ログ確認済み）</p></div>
+        <p>2026-09-07 04:01 作成。稼働中の terminal-app は 04:00:29 に新しい版で再起動済み（プロセス番号 100028）。</p></div>
       <div class="card span-12"><h3>画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
-        <p><span class="status info">対象外（デスクトップアプリのため確認用サーバーなし）</span>
-           terminal-app は Electron（Web技術で作るデスクトップアプリ）なので、ブラウザで開く確認用サーバーはありません。代わりに稼働中のアプリを再起動して新しいビルドを反映済みです（新プロセス 06:12:18 起動、起動ログにエラーなし）。</p>
-        <p>確認する画面: 画面右上の整列ボタンとタイルのドラッグは、起動中の terminal-app の画面で直接確認してください。自動確認時の画面は「11. 検証・実施ログ」のスクリーンショットにあります。</p>
+        <p><span class="status ok">対象外（画面の変更なし）</span>
+           今回は「いつ実行中と判定するか」の中身の変更で、画面（見た目）の変更はありません。</p>
+        <p>確認する画面: 今回は画面の変更がないため起動していません</p>
         </div>
     </div>
   </section>
@@ -113,17 +113,13 @@
     <div class="table-wrap"><table>
       <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / 返信）</th></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
-        <td><span class="status bad">今すぐ・目で確認</span></td>
-        <td>再起動済みの terminal-app で右上の整列ボタン（フォルダ追加ボタンの右隣）を押し、接続中のタイルが左上に来るか確認する</td>
-        <td>確認後にチャットへ返信: <strong>OK</strong> = 期待どおり / <strong>NG</strong> = 違う点を一言（例「NG 待機中のタイルも前に来てほしい」）</td></tr>
+        <td><span class="status info">後でよい・コピペ</span></td>
+        <td>次に品質ループや codex を動かしたあと、terminal-app が「実行中へ戻した」記録を残しているか確認する。タイルが「完了」「切断」のまま止まっていたら、その時刻をチャットで教えてください</td>
+        <td>コマンドプロンプト（黒い画面）で実行すると、戻した記録の行だけが出ます:<br><code class="copy">findstr /C:"実行中へ復帰" "%APPDATA%\terminal-app\logs\app.log"</code></td></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
-        <td><span class="status bad">今すぐ・目で確認</span></td>
-        <td>タイルを1枚マウスでつかんで別のタイルの左半分／右半分に落とし、その手前／直後に移ることを確認する（ドロップ先の枠と縦線が青くなります）</td>
-        <td>確認後にチャットへ返信: <strong>OK</strong> / <strong>NG</strong> = 違う点を一言</td></tr>
-      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>3</td>
         <td><span class="status warn">返信で選ぶ</span></td>
-        <td>「9. 確認事項」の3問（自動整列のタイミング・接続中の中での並び順・コミットの可否）に答える</td>
-        <td>例: <strong>1-A 2-A 3-A</strong>（全部おまかせなら「全部A」）</td></tr>
+        <td>ループの進捗バッジ（タイルに「ループ 2/4 generator」のように今の段階を出す機能。提案時の案 C）を追加するか決める</td>
+        <td><strong>A</strong> = 今回は見送る（推奨。今回の問題は判定の修正で解決済み） / <strong>B</strong> = 追加する（eval-loop の状態ファイルを読む機能を足す）</td></tr>
     </table></div>
   </section>
 
@@ -131,20 +127,20 @@
     <h2>3. 今回の差分</h2>
     <div class="table-wrap"><table>
       <tr><th>区分</th><th>内容</th></tr>
-      <tr><td>前回からの推移</td><td>状態: 要確認 → 要確認 / 自己採点: 85 → 88 / 残タスク: 3件 → 3件（前回の3件は別案件 260904_1 のもの。引き継ぎ状況は未確認）</td></tr>
-      <tr><td>新しく完了</td><td>整列ボタン（#1）、タイルのドラッグ&amp;ドロップ並べ替え（#2）、自動整列（接続中を左上へ）、並び順の保存（projects.json の配列順）、E2Eテスト台本 <code>scripts/verify-arrange-e2e.mjs</code>、単体テスト2ファイル（19件）</td></tr>
-      <tr><td>新しく発生した懸念</td><td>自動整列は「ボタンを押した時に1回」動く仕様にした（常時自動ではない）。接続中グループの中は今の順序を保つ。どちらも仮定なので意図と違えば変更が必要</td></tr>
-      <tr><td>解消済み</td><td>該当なし（今回は新機能の追加のみ）</td></tr>
-      <tr><td>未変化</td><td>コミット（変更の保存記録）は指示待ちのため未実施（前回同様）</td></tr>
+      <tr><td>前回からの推移</td><td>状態: 要確認→要確認 / 自己採点: 88→88 / 残タスク: 3件→2件</td></tr>
+      <tr><td>新しく完了</td><td>260907_1 一式: 登録簿（Claude Code が自分の状態を書くファイル）の busy、Stop が止められた痕跡、下請け AI（subagent）の記録の 3 つを根拠にタイルを「実行中」に保つ・戻す判定。完了通知（トースト）の保留。実画面での確認 24 項目。稼働アプリへの反映。実装のコミット 9855b19</td></tr>
+      <tr><td>新しく発生した懸念</td><td>完了通知が最大 3.5 秒遅れる。Stop 時の後処理（hook）が 3.5 秒以上かかると一時的に「実行中」へ戻り、その後の終了検知で「完了」に戻る（そのときの完了通知は出ない）</td></tr>
+      <tr><td>解消済み</td><td>「codex や fork が作業中なのにタイルが完了・切断のまま」（今回の依頼）。前回の残タスク「変更をコミット」は前回セッションで記録済み（9005682）</td></tr>
+      <tr><td>未変化</td><td>前回 260906_1 の手動確認（整列ボタンとドラッグ並べ替えの実機確認、仮定 2 点の可否）は今回触れていない（回答の有無は未確認）</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-4">
     <h2>4. 現状サマリー</h2>
     <div class="table-wrap"><table>
-      <tr><th>目的</th><td>画面メモ #1「整列ボタンを追加」・#2「ドラッグドロップでカードを並べ替え」と、依頼文「自動整列で接続中のアプリを左上に」を terminal-app に実装する</td></tr>
-      <tr><th>今回できたこと</th><td>(1) タイトルバー右のボタン群に整列ボタンを追加。押すと接続中（対象アプリのウィンドウがある、または実行中・確認待ち）のタイルが左上から並び、未接続（灰色）が末尾へ移る。(2) タイルをマウスでつかんで別タイルの左半分／右半分に落とすと、その手前／直後へ移動。分割タイル ①② はプロジェクト単位で一緒に動く。(3) 並び順は projects.json（登録プロジェクト一覧の保存ファイル）の配列順としてそのまま保存され、再起動後も保持される。(4) フォルダを落として登録する既存のドロップ機能と混ざらないことも自動確認済み</td></tr>
-      <tr><th>まだ残っていること</th><td>実アプリでの人の手によるマウス操作の確認（自動確認は合成イベントで実施済み）／仮定2点の確認／コミット</td></tr>
+      <tr><th>目的</th><td>品質ループや codex が作業中なのに、terminal-app のタイルが「完了」「切断」のまま止まって見える問題を直す</td></tr>
+      <tr><th>今回できたこと</th><td>原因 2 経路を実ログで特定（Stop hook が止められて続行した場合に「完了」が来る／同期 fork 中に本体の記録が止まり「切断」になる）。terminal-app 側の判定を 3 系統の根拠で修正。Stop 受信の 3.5 秒後に判定をやり直し、完了通知はその後に出す。新規テスト 49 件・実画面確認 24 項目・稼働アプリ再起動</td></tr>
+      <tr><th>まだ残っていること</th><td>実際のループで Stop が止められた場面を観測して効き目を確認する（時間依存）。ループ進捗バッジ（案 C）は要否の判断待ち</td></tr>
       <tr><th>作業を止めている問題</th><td>該当なし</td></tr>
     </table></div>
   </section>
@@ -153,14 +149,14 @@
     <h2>5. プラン進捗（計画の進み具合）</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
-      <tr><td>純関数（自動整列の順序計算・D&amp;D の移動計算・接続中判定）を先にテストで定義</td><td><span class="status ok">完了</span></td><td><code>tests/format-arrange.test.ts</code>（14件、先に失敗を確認してから実装） → <code>src/renderer/format.ts</code></td></tr>
-      <tr><td>並び順の保存（projects.json の配列順を並べ替える）</td><td><span class="status ok">完了</span></td><td><code>tests/project-store-reorder.test.ts</code>（5件） → <code>src/main/project-store.ts</code> の reorderProjects</td></tr>
-      <tr><td>画面とアプリ本体をつなぐ配線（型定義・preload・IPC）</td><td><span class="status ok">完了</span></td><td><code>src/shared/types.d.ts</code> / <code>src/preload/index.ts</code> / <code>src/main/index.ts</code>（reorder-projects）</td></tr>
-      <tr><td>整列ボタン・タイルのドラッグ&amp;ドロップ・挿入位置の目印</td><td><span class="status ok">完了</span></td><td><code>src/renderer/index.html</code> / <code>renderer.ts</code> / <code>styles.css</code></td></tr>
-      <tr><td>E2Eテスト（実 Electron を遠隔操作して確認）と証跡画像</td><td><span class="status ok">完了</span></td><td><code>scripts/verify-arrange-e2e.mjs</code> 全20項目 OK → <code>docs/evidence/20260906-arrange/</code>（画像5枚を目視確認）</td></tr>
-      <tr><td>仕様書・設計書・検証書・計画書の追記</td><td><span class="status ok">完了</span></td><td><code>docs/spec.md</code>（REQ-15/16, AC-19/20） / <code>docs/design.md</code>（6.2, 9, 11章） / <code>docs/verification.md</code>（V-21） / <code>plans/plan.md</code></td></tr>
-      <tr><td>稼働中アプリへの反映（再起動）</td><td><span class="status ok">完了</span></td><td>旧プロセス 76988 を終了 → 新プロセス 89908 を 06:12:18 に起動。起動ログにエラーなし</td></tr>
-      <tr><td>コミット（変更の保存記録）</td><td><span class="status warn">未着手</span></td><td>指示待ち（12ファイル変更＋新規4件）</td></tr>
+      <tr><td>Task 1: 終端分類と block 痕跡（記録の末尾から「ターンが続いているか」を読む）</td><td><span class="status ok">完了</span></td><td><code>src/main/session-scan.ts</code> / <code>tests/session-scan-blocked-stop.test.ts</code>（18 件）</td></tr>
+      <tr><td>Task 2: 完了・切断から実行中へ戻す判定（純関数）</td><td><span class="status ok">完了</span></td><td><code>src/main/liveness-monitor.ts</code> / <code>tests/liveness-monitor-stopped-resume.test.ts</code>（20 件）</td></tr>
+      <tr><td>Task 3: 状態ストアの遷移（戻す操作と一覧）</td><td><span class="status ok">完了</span></td><td><code>src/main/state-store.ts</code> / <code>tests/state-store-stopped-resume.test.ts</code>（8 件）</td></tr>
+      <tr><td>Task 4: 登録簿ディレクトリの差し替え（検証用の設定値）</td><td><span class="status ok">完了</span></td><td><code>src/main/session-registry.ts</code> / <code>tests/session-registry-env.test.ts</code>（3 件）</td></tr>
+      <tr><td>Task 5: 配線（15 秒ごとの見直し・Stop 後の前倒し判定・通知の保留・終了時の後始末）</td><td><span class="status ok">完了</span></td><td><code>src/main/index.ts</code>。型チェック / Lint / 全テスト すべて成功</td></tr>
+      <tr><td>Task 6: 実画面での動作確認（E2E）</td><td><span class="status ok">完了</span></td><td><code>scripts/verify-loop-running-e2e.mjs</code> → <code>docs/evidence/20260907-loop-running/</code>（24 項目 OK・画像 4 枚を目視）</td></tr>
+      <tr><td>Task 7: 稼働アプリへの反映と実環境確認</td><td><span class="status warn">一部完了</span></td><td>再起動済み（04:00:29、プロセス番号 100028）。実ループでの「戻した」記録はまだ出ていない（次のループで確認）</td></tr>
+      <tr><td>Task 8: ドキュメントと完了報告</td><td><span class="status ok">完了</span></td><td>spec（REQ-17 / AC-21）・design（5.1, 5.2）・verification（V-22）・verification-results（8 章）・README・plan・本報告</td></tr>
     </table></div>
   </section>
 
@@ -169,11 +165,9 @@
     <div class="table-wrap"><table>
       <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
       <tr><td>あなた（ユーザー）の判断待ち</td>
-        <td class="priority-high">高</td><td>実アプリで整列ボタンとドラッグ並べ替えを実際に触って確認する</td><td>自動確認は合成イベント（プログラムが作ったマウス操作）なので、本物のマウス操作の手触りは人の確認が必要</td><td>「2. あなたの次のアクション」の 1・2</td></tr>
+        <td class="priority-mid">中</td><td>次のループでタイルが「実行中」を保つか、実地で確認する</td><td>Stop が止められて続行した実物の記録が本機でまだ発生しておらず、擬似データでしか確認できていない</td><td>「2. あなたの次のアクション」の 1</td></tr>
       <tr><td>あなた（ユーザー）の判断待ち</td>
-        <td class="priority-mid">中</td><td>仮定2点（自動整列は押した時だけ／接続中の中は今の順序を維持）の可否</td><td>依頼文だけでは決められなかったため、安全側の解釈で実装した</td><td>「9. 確認事項」の 1・2 に返信</td></tr>
-      <tr><td>AIがこのまま進められる</td>
-        <td class="priority-mid">中</td><td>変更をコミット（保存記録）する</td><td>今回の変更はまだ作業ツリーにあるだけで、記録されていない</td><td>「コミットして」と返信（「14. AIが次にできること」の 1）</td></tr>
+        <td class="priority-low">低</td><td>ループ進捗バッジ（案 C）の要否を決める</td><td>提案時に A（判定の修正）だけ承認され、C は保留のまま</td><td>「2. あなたの次のアクション」の 2</td></tr>
     </table></div>
   </section>
 
@@ -181,12 +175,12 @@
     <h2>7. 自己採点</h2>
     <div class="table-wrap"><table>
       <tr><th>観点</th><th>配点</th><th>得点</th><th>根拠</th></tr>
-      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>27</td><td>#1 整列ボタン・#2 D&amp;D 並べ替え・自動整列（接続中を左上へ）の3点すべて実装し、並び順も保存される。自動整列のタイミングとグループ内の順序は仮定で決めたため満点にしない</td></tr>
-      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>テストを先に書いて失敗を確認してから実装（TDD）。順序計算を画面に依存しない純関数に分離。既存のフォルダ登録ドロップと専用 MIME で切り分け。順序が同じなら保存も再描画もしない</td></tr>
-      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>17</td><td>単体テスト394件（新規19件）・型チェック・Lint・ビルド・E2Eテスト20項目すべて成功。証跡画像5枚を目視。実アプリでの本物のマウス操作は未実施（本番の projects.json を触らないため）</td></tr>
-      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>フォルダ登録ドロップの回帰（既存機能が壊れていないか）を E2E で確認。分割タイルの扱い・未知 id・重複 id・自分自身へのドロップなど境界を単体テストで固定。合成イベントと実マウスの差は残る</td></tr>
-      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>仮定を明示し、確認事項を A/B 形式にした。仕様書・設計書・検証書にも追記済み</td></tr>
-      <tr><th>総合</th><th>100</th><th>88</th><th>機能は3点とも完成し検証済み。仮定2点の確認と実操作の確認が残るため「要確認」</th></tr>
+      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>27</td><td>依頼「まだ作業中として扱いたい」を、原因 2 経路（止められた Stop・同期 fork の記録停止）の両方で実装。実ループでの実観測が残るため満点にしない</td></tr>
+      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>既存の「確認待ちから復帰」と同じ構造（純関数＋依存の注入）で追加。既存テストは無改変で 443 件成功。登録簿の busy が古いまま残る事故への保険（記録の末尾が完了なら信じない）付き</td></tr>
+      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>17</td><td>テストを先に書いて失敗（42 件）を確認してから実装（TDD）。実画面確認 24 項目と画像の目視。稼働アプリを再起動。ただし止められた Stop の実物の記録は未観測</td></tr>
+      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>登録簿は公開仕様ではない内部ファイル（形式が変われば従来の判定に自動で戻る設計）。既知の限界（後処理が 3.5 秒超のとき）を設計書に明記</td></tr>
+      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>原因・根拠・限界を実ログの時刻付きで記録。用語には説明を添えた</td></tr>
+      <tr><th>総合</th><th>100</th><th>88</th><th>実装と検証は完了。実ループでの効き目の確認が残るため「要確認」</th></tr>
     </table></div>
   </section>
 
@@ -194,9 +188,9 @@
     <h2>8. 懸念事項</h2>
     <div class="table-wrap"><table>
       <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
-      <tr><td class="priority-mid">中</td><td>自動整列は「押した時に1回」だけ動く。接続状態が変わっても勝手に並び替わらない</td><td>常に自動で並び替わることを期待していると「整列されていない」と感じる</td><td>意図と違えば常時追従（5秒ごとの接続判定に合わせて自動で並び替え）に変更できる（確認事項1）</td></tr>
-      <tr><td class="priority-mid">中</td><td>接続中グループの中は今の順序（ドラッグで決めた順）を保つ。状態（確認待ち・実行中・完了）では並べない</td><td>「確認待ちを一番前に」等の期待があると合わない</td><td>状態順（確認待ち → 実行中 → 完了 → 待機）の並べ替えを追加できる（確認事項2）</td></tr>
-      <tr><td class="priority-low">低</td><td>D&amp;D の自動確認は合成イベント。本物のマウスでは button 要素のドラッグ開始の手触り（少し動かすと始まる）が異なる可能性</td><td>つかみにくい・クリックと誤認する等の体験差</td><td>実アプリで一度触って確認（次のアクション2）。問題があれば調整する</td></tr>
+      <tr><td class="priority-mid">中</td><td>Claude Code の登録簿（<code>~/.claude/sessions</code>）は公開仕様ではない</td><td>Claude Code の更新で形式が変わると busy による判定が効かなくなる（従来の記録ファイル判定に戻るだけで、壊れはしない）</td><td>更新後にログで「登録簿 status=busy」の復帰が出るか確認する</td></tr>
+      <tr><td class="priority-mid">中</td><td>Stop 時の後処理（hook）全体が 3.5 秒以上かかると、登録簿がまだ busy のため一時的に「実行中」へ戻る</td><td>「完了」の表示が最大 25 秒ほど遅れ、そのときの完了通知は出ない</td><td>頻発するなら猶予（設定値 TERMINAL_APP_STOPPED_RESUME_MIN_AGE_MS）を延ばす</td></tr>
+      <tr><td class="priority-low">低</td><td>完了通知（トースト）が最大 3.5 秒遅れる</td><td>「完了」の知らせがわずかに遅く感じる</td><td>許容範囲と判断。気になれば短縮できる（確認事項 2）</td></tr>
     </table></div>
   </section>
 
@@ -205,56 +199,49 @@
     <p class="muted">記号だけ返信すれば伝わります（例: 「1-A 2-B」）。全部おまかせなら「全部A」でも大丈夫です。</p>
     <div class="table-wrap"><table>
       <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
-      <tr><td>1</td><td class="priority-mid">中</td><td>自動整列はいつ動くのがよいですか</td>
-        <td><strong>A</strong> = 整列ボタンを押した時だけ（今の実装。タイルが勝手に動かない）（推奨） / <strong>B</strong> = 常時自動（接続状態が変わるたびに並び替わる）</td></tr>
-      <tr><td>2</td><td class="priority-mid">中</td><td>接続中グループの中の並び順はどうしますか</td>
-        <td><strong>A</strong> = 今の順序を維持（ドラッグで決めた順を尊重）（推奨） / <strong>B</strong> = 状態順に並べる（確認待ち → 実行中 → 完了 → 待機）</td></tr>
-      <tr><td>3</td><td class="priority-low">低</td><td>今回の変更をコミット（保存記録）してよいですか</td>
-        <td><strong>A</strong> = 触って確認してからコミット（推奨） / <strong>B</strong> = 今すぐこの内容でコミット</td></tr>
+      <tr><td>1</td><td class="priority-low">低</td><td>ループ進捗バッジ（案 C）を追加するか</td>
+        <td><strong>A</strong> = 見送る（今回の問題は判定修正で解決済み）（推奨） / <strong>B</strong> = 追加する（eval-loop の状態ファイルを読み「ループ 2/4 generator」を表示）</td></tr>
+      <tr><td>2</td><td class="priority-low">低</td><td>完了通知の遅れは 3.5 秒のままでよいか</td>
+        <td><strong>A</strong> = このまま（誤通知を確実に防げる）（推奨） / <strong>B</strong> = 短くする（誤通知の可能性がわずかに増える）</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-10">
     <h2>10. 対象外・未対応（今回やっていないこと）</h2>
-    <ul>
-      <li>常時の自動整列（接続状態の変化に追従して勝手に並び替える）は入れていない（確認事項1）</li>
-      <li>接続中の中を状態順（確認待ち・実行中・完了）で並べることはしていない（確認事項2）</li>
-      <li>並び順を「登録順に戻す」ボタンは作っていない（ドラッグで戻せるため）</li>
-      <li>設定画面のプロジェクト一覧の並べ替え UI は作っていない（タイルの順に連動して表示されるのみ）</li>
-      <li>本番の projects.json（登録一覧の保存ファイル）は触っていない。実アプリでの整列ボタン操作は未実施</li>
-      <li>コミット（変更の保存記録）は指示待ちのため未実施</li>
-    </ul>
+    <ul><li>eval-loop 側（hook・スクリプト）は変更していない（terminal-app 側だけで完結）</li>
+      <li>登録簿の idle / waiting を「完了」「確認待ち」の根拠にすること（今回は busy だけを使う）</li>
+      <li>ループ進捗バッジ（案 C）</li>
+      <li>前回 260906_1 の手動確認枠（整列ボタン・ドラッグ並べ替えの実機確認）</li>
+      <li>GitHub への push（送信）。コミット（保存記録）までで、送信はしていない</li></ul>
   </section>
 
   <section class="card" id="sec-11">
     <h2>11. 検証・実施ログ</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>結果</th><th>内容</th></tr>
-      <tr><td>変更ファイル</td><td><span class="status info">12件変更 + 新規4件</span></td><td>src: renderer.ts / format.ts / index.html / styles.css / project-store.ts / index.ts / preload / types.d.ts、docs: spec / design / verification / plan。新規: tests 2本・scripts/verify-arrange-e2e.mjs・docs/evidence/20260906-arrange/</td></tr>
-      <tr><td>単体テスト（部品ごとの自動テスト）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>: 46ファイル 394件すべて成功。新規19件は先に失敗（関数未定義）を確認してから実装して成功に変えた</td></tr>
-      <tr><td>動作テスト（E2Eテスト）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-arrange-e2e.mjs docs/evidence/20260906-arrange</code>: 実 Electron をデモデータ12件で起動し遠隔操作。自動整列で接続中10件が先頭・未接続2件が末尾、再押下は「整列済み」案内、ドラッグで手前／直後の両方向、保存ファイルへの反映、内部ドラッグ中はフォルダ登録の覆いが出ない、フォルダのドロップは従来どおり覆いが出る、の20項目すべて OK</td></tr>
-      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>: TypeScript を JavaScript に変換し、画面ファイルを dist へコピー。整列ボタンが出力に含まれることを確認</td></tr>
-      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>（型の整合性）と <code>npm run lint</code>（書き方の自動チェック）とも指摘なし</td></tr>
-      <tr><td>稼働中アプリの再起動（新ビルドの反映）</td><td><span class="status ok">成功</span></td><td>旧プロセス 76988 に終了を送り、終了を待ってから新プロセス 89908 を起動（06:12:18）。app.log に「終了」「起動」「window shown」が記録され、エラー行は0件</td></tr>
-      <tr><td>実アプリでの実操作（整列ボタン・マウスドラッグ）</td><td><span class="status warn">未実施</span></td><td>本番の登録一覧を触らないため実施していない。自動確認はデモデータで実施済み。あなたの操作で確認してください</td></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">17件＋証跡 6件</span></td><td>本体 5（<code>src/main/</code> の index / liveness-monitor / session-registry / session-scan / state-store）、新規テスト 4、E2E スクリプト 1、docs 5、README、plan。証跡は <code>docs/evidence/20260907-loop-running/</code></td></tr>
+      <tr><td>動作テスト</td><td><span class="status ok">成功</span></td><td><code>npm test</code>（自動テスト一式）= 50 ファイル / 443 件すべて成功。新規 49 件は実装前に 42 件の失敗を確認してから実装。E2E（実際の画面での動作確認）24 項目 OK</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を Electron が実行できる形に変換）exit 0。稼働アプリを止めて新しい版で再起動（04:00:29）</td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>（型の整合性）と <code>npm run lint</code>（書き方の規約）ともに exit 0</td></tr>
     </table></div>
     <details><summary>詳細ログ・スクリーンショット</summary>
-      <p>E2Eテストの画面（クリックで開く。生パスも併記）:</p>
+      <p>E2E の画像（クリックで開く。画像は埋め込んでいません）:</p>
       <ul>
-        <li>整列前（登録順。整列ボタンがフォルダ追加の右隣に出ている）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/01-main-before.png">01-main-before.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\01-main-before.png</li>
-        <li>自動整列後（接続中10件が左上から、未接続2件が末尾で灰色。下部に案内文）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/02-main-arranged.png">02-main-arranged.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\02-main-arranged.png</li>
-        <li>ドラッグ中（ドロップ先「在庫管理-app」の枠と左の縦線が青、ドラッグ元「売上レポート-app」は薄く表示）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/03-main-drag-marker.png">03-main-drag-marker.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\03-main-drag-marker.png</li>
-        <li>ドロップ後（末尾のタイルが先頭へ移動）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/04-main-after-drop-front.png">04-main-after-drop-front.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\04-main-after-drop-front.png</li>
-        <li>右方向へのドロップ後（先頭のタイルが3番目の直後へ）: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/05-main-after-drop-right.png">05-main-after-drop-right.png</a><br>C:\Users\hppym\dev\terminal-app\docs\evidence\20260906-arrange\05-main-after-drop-right.png</li>
-        <li>E2E の判定結果: <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260906-arrange/result.json">result.json</a>（failures が空 = 全項目 OK）</li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/01-cli-resumed-from-done.png">01-cli-resumed-from-done.png</a> — 登録簿 busy のまま Stop を受けた 4.5 秒後に「実行中」へ戻ったタイル<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-running\01-cli-resumed-from-done.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/02-vscode-resumed-by-blocked-stop.png">02-vscode-resumed-by-blocked-stop.png</a> — 止められた Stop の痕跡で戻り、作業テキストが「[Eval-loop iteration 1/4 | RESUME 1/3]」になったタイル<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-running\02-vscode-resumed-by-blocked-stop.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/03-vscode-disconnected.png">03-vscode-disconnected.png</a> — 本体と下請け AI の記録が両方古いときの「切断」<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-running\03-vscode-disconnected.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/04-vscode-resumed-from-disconnected.png">04-vscode-resumed-from-disconnected.png</a> — 下請け AI の記録が更新されて「実行中」へ戻ったタイル<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-running\04-vscode-resumed-from-disconnected.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/app.log">app.log</a>（E2E 中のアプリのログ）／ <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/result.json">result.json</a>（結果の要約）</li>
       </ul>
-      <p>仕様の要点（仮定を含む）:</p>
+      <p>E2E ログの要点（UTC 表記。日本時間は +9 時間）:</p>
       <ul>
-        <li>接続中の判定は既存の「未接続（灰色）」判定の逆。対象アプリのウィンドウがあるか、実行中・確認待ちなら接続中。分割タイルは1本でも接続中なら接続中</li>
-        <li>自動整列は接続中グループ・未接続グループそれぞれの相対順を保つ。押しても順序が変わらなければ「すでに整列済みです（接続中 N 件が先頭）」と案内</li>
-        <li>ドロップ位置はドロップ先タイルの左半分 = 手前、右半分 = 直後。分割タイル ①② はプロジェクト単位で一緒に動く</li>
-        <li>並び順は projects.json の配列順そのもの（新しい項目は追加していない）。順序が同じなら保存しない</li>
+        <li>18:58:59 Stop → done → 18:59:03「完了から実行中へ復帰 … 登録簿 status=busy」</li>
+        <li>18:59:11 Stop → done → 18:59:15「完了から実行中へ復帰 … Stop hook が続行を指示 [Eval-loop iteration 1/4 | RESUME 1/3]」</li>
+        <li>18:59:35「切断検知」→ 18:59:39「切断から実行中へ復帰 … subagent 記録が更新」</li>
       </ul>
+      <p>初回の E2E は検証用の切断しきい値を 4 秒にしていたため、待ち時間中に誤って切断になり 3 件 NG でした（アプリ側の判定は正しく動作。ログに復帰の記録あり）。しきい値を 20 秒にし、切断させたい場面は記録の更新時刻を 60 秒前に設定する方式に直して全件 OK。</p>
+      <p>実環境の裏付け（2026-09-07 03:00〜03:35 JST。実稼働アプリのログと登録簿の突合）: Monthly-report のループは 03:12 の同期 fork 開始で本体の記録が止まり 03:27 に「切断」と誤判定。その間、登録簿は busy、下請け AI の記録は 03:32 時点でも更新中でした。登録簿の状態は Stop と同じ秒に idle、Esc 割り込みでも idle に切り替わることを 4 セッションで確認。</p>
+      <p>稼働アプリの再起動: 19:00:05Z「terminal-app 終了」→ 19:00:29Z「terminal-app 起動」（<code>%APPDATA%\terminal-app\logs\app.log</code>）。</p>
     </details>
   </section>
 
@@ -265,9 +252,9 @@
     <div class="table-wrap"><table>
       <tr><th>役割</th><th>担当</th><th>モデルID</th><th>備考</th></tr>
       <tr><td>進行管理（全体のとりまとめ）</td><td>メインセッション（この会話のAI）</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
-      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>サブエージェント（別のAI）は使っていない</td></tr>
-      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>Codex への委任なし（CLAUDE.md の既定どおり直接実装）</td></tr>
-      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>自動テスト・E2E・証跡画像の目視・自己採点とも同一セッション</td></tr>
+      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上（サブエージェントは使っていない）</td></tr>
+      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上</td></tr>
+      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上。自動テストと E2E スクリプトの実行結果に基づく</td></tr>
     </table></div>
   </section>
 
@@ -279,39 +266,38 @@
     <div class="table-wrap"><table>
       <tr><th>用語</th><th>意味</th></tr>
       <tr><td>モデルID</td><td>AIの種類を表す正式な名前。同じ「Claude」でも性能や世代が違うため、この名前でどのAIが作業したかを特定できる</td></tr>
-      <tr><td>D&amp;D（ドラッグ&amp;ドロップ）</td><td>マウスでつかんで別の場所に落とす操作。今回はタイルの並べ替えに使う</td></tr>
-      <tr><td>接続中 / 未接続</td><td>タイルのプロジェクトを開いている Cursor またはターミナルのウィンドウがある状態が接続中。無いと灰色の未接続</td></tr>
-      <tr><td>分割タイル ①②</td><td>同じフォルダで Claude Code が2本以上動いているときに、1プロジェクトが番号付きの複数タイルに分かれる表示</td></tr>
-      <tr><td>projects.json</td><td>登録したプロジェクトの一覧を保存するファイル。今回はこの並び順がそのままタイルの順になる</td></tr>
-      <tr><td>E2Eテスト</td><td>実際の画面操作をなぞる動作確認。今回はプログラムが本物のアプリを遠隔操作して確認した</td></tr>
-      <tr><td>合成イベント</td><td>プログラムが作った疑似的なマウス操作。本物のマウスと同じ手順でアプリに伝える</td></tr>
-      <tr><td>単体テスト（vitest）</td><td>部品ごとの自動テスト。vitest はその実行ツール</td></tr>
-      <tr><td>TDD</td><td>先にテストを書いて失敗を確かめてから実装する進め方。テストが本当に機能を確かめていることを保証する</td></tr>
-      <tr><td>Lint / 型チェック / ビルド</td><td>コードの書き方・整合性の自動チェック / プログラムを動く形に変換する処理</td></tr>
-      <tr><td>Electron</td><td>Web の技術でデスクトップアプリを作る仕組み。terminal-app はこれで動いている</td></tr>
-      <tr><td>コミット</td><td>変更の保存記録（commit）。まだ実施していない</td></tr>
+      <tr><td>品質ループ（eval-loop）</td><td>AI が実装と採点を繰り返し、点数が目標に届くまで自動で直し続ける仕組み</td></tr>
+      <tr><td>Stop hook</td><td>Claude が応答を終えるときに自動で走る外部プログラム。「まだ続けろ」と返して止めさせないこともできる（block）</td></tr>
+      <tr><td>登録簿</td><td>Claude Code が自分の状態（busy=作業中 / idle=待ち / waiting=入力待ち）を書き出すファイル。<code>~/.claude/sessions</code> にある</td></tr>
+      <tr><td>transcript（記録ファイル）</td><td>Claude とのやり取りを 1 行ずつ保存したファイル。末尾を見るとターンが終わったかが分かる</td></tr>
+      <tr><td>同期 fork</td><td>メインの AI が別の AI（サブエージェント）に作業を任せ、終わるまで待つ方式。待っている間、本体の記録ファイルは更新されない</td></tr>
+      <tr><td>サブエージェント</td><td>メインの AI から作業を任された別の AI。記録は <code>subagents/agent-*.jsonl</code> に別建てで残る</td></tr>
+      <tr><td>E2Eテスト</td><td>実際の画面操作をなぞる動作確認。今回は本物のアプリを別ポートで起動し、擬似の登録簿と記録ファイルで再現した</td></tr>
+      <tr><td>トースト</td><td>画面右下に出る Windows の通知</td></tr>
+      <tr><td>TDD</td><td>先にテストを書いて失敗を確かめてから実装する進め方（テスト駆動開発）</td></tr>
+      <tr><td>掃引</td><td>15 秒ごとに全セッションの状態を見直す定期処理</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-14">
     <h2>14. AIが次にできること（あなたの操作は不要）</h2>
     <ol>
-      <li>今回の変更をコミット（保存記録）する
+      <li>実際のループで Stop が止められた場面が起きたら、その記録ファイルの実物を確認し、末尾の分類が想定どおりかを裏取りする
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>コミットして</pre>
+          <pre>実ループの block 痕跡を確認して</pre>
         </div>
       </li>
-      <li>自動整列を常時追従（接続状態が変わるたびに自動で並び替え）に変更する
+      <li>ループ進捗バッジ（案 C）を実装し、タイルに「ループ 2/4 generator」のような段階を表示する
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>自動整列を常時オンにして</pre>
+          <pre>ループ進捗バッジを追加して</pre>
         </div>
       </li>
-      <li>接続中グループの中も状態順（確認待ち → 実行中 → 完了 → 待機）に並べる
+      <li>今回のコミット（実装と報告書）を GitHub へ送信する
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>整列で状態順にも並べて</pre>
+          <pre>push して</pre>
         </div>
       </li>
     </ol>
