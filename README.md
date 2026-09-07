@@ -25,6 +25,23 @@ npm run build
 npm start
 ```
 
+### 他の PC への導入（クローンから起動まで）
+
+```
+git clone https://github.com/kurocoma/terminal-app.git
+cd terminal-app
+npm install
+npm run build
+start-app.bat
+```
+
+- 前提は Node.js 22+ と `curl.exe`（Windows 10+ 同梱）だけ。設定・登録情報は `%APPDATA%\terminal-app\` に PC ごとに作られる
+  （リポジトリには含まれない）。
+- 起動後にプロジェクトのフォルダをウィンドウへドラッグ&ドロップすると、そのフォルダの `.claude/settings.json` に hooks が
+  自動追記されて監視が始まる（既存設定は保全・バックアップ付き）。
+- 品質ループ（eval-loop）の進捗バッジは `%USERPROFILE%\.claude\eval-loop\` がある PC でだけ出る。無ければ単に非表示になる。
+- 2 回目以降の起動は `start-app.bat` だけでよい（ビルド済みなら再ビルドしない）。
+
 - フォルダをウィンドウへドラッグ&ドロップするとプロジェクトが登録され、
   対象の `.claude/settings.json` に **Stop / Notification / UserPromptSubmit の 3 イベント**の
   hooks が自動追記される（既存設定は保全・バックアップ `settings.json.terminal-app.bak` 作成・冪等。
