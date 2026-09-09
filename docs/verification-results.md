@@ -303,3 +303,16 @@ clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
   3 つ置いてもバッジ無し・Stop で完了（保持されない）。(f) `notification_type: idle_prompt` は文言が permission 風でも保持、`agent_needs_input` は確認待ち。
   ログに「種別=idle(idle_prompt)」を併記。既存 (a)〜(g) は全件 OK のまま（本物のループ state には task を書くようにした）。
 - 稼働アプリ: 手動 GC の直後の掃引（01:44:44Z）で「保持を解除 → 終了検知 → 完了」を確認。新ビルドで再起動。
+
+### 8.9 追記: 260909_1 入力待ちの誤「切断」防止・SessionStart（V-24。証跡 = 単体テスト・実ログ）
+
+- 発端（2026-09-09 12:38 ユーザー報告）: instagram-app のタイルが「切断・8 分前」のまま。実ログ: 03:08:50Z idle_prompt → 確認待ち、
+  03:14:46Z「確認待ちから復帰 — 許可後に transcript が更新」（実体はユーザーの `/effort` `/model`。transcript に user レコード 3 件）、
+  03:30:01Z「切断検知 — transcript 更新途絶」（登録簿は idle・プロセス生存）。03:37:47Z に本当に終了（再起動）し新セッションが始まったが、
+  新セッションは最初のプロンプトまでイベントが無く、前セッションの「切断」が残った。
+- 自動テスト: 新規 `tests/liveness-monitor-idle.test.ts`（終端分類のローカルコマンド読み飛ばし・confirm 復帰の open 要件・findIdleConcluded・
+  切断判定の idle 除外）6 件、`tests/state-store-session-start.test.ts` 4 件。既存の期待値変更 2 か所（idle は切断しない）。
+  `npm test`: **56 ファイル / 490 テスト全件 green**。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E 回帰: `node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260909-remnant` 35 項目すべて OK のまま。
+- 稼働アプリ: 新ビルドで再起動。起動時追補で登録済み全プロジェクトの `.claude/settings.json` に SessionStart が追記される（ログ「起動時追補」）。
+  SessionStart は新しい Claude Code セッションから発火する（既存セッションには効かない）。

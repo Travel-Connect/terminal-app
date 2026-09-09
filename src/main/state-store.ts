@@ -15,7 +15,7 @@ import type { Project, SessionState, SessionView, StatusCounts } from "../shared
  * SessionEnd は受信側のみ対応（OPEN-03）。TaskCreated はタスク作成タイトルの取得経路（260712_3 —
  * 実 claude 2.1.207 の hook stdin ダンプで payload を実測確認済み）。
  */
-export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd", "TaskCreated"] as const;
+export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd", "TaskCreated", "SessionStart"] as const;
 export type HookEventName = (typeof ACCEPTED_EVENT_NAMES)[number];
 
 export interface HookEvent {
@@ -27,6 +27,8 @@ export interface HookEvent {
   transcript_path?: string;
   /** UserPromptSubmit のみ: 送信されたプロンプト本文（現在の作業テキストの実データ源。260712 課題B） */
   prompt?: string;
+  /** SessionStart のみ: startup / resume / clear / compact / fork（公式 hooks reference。260909_1。ログ用） */
+  source?: string;
   /** TaskCreated のみ: 作成されたタスクの件名（作業テキストの実データ源。260712_3） */
   task_subject?: string;
   /**
@@ -68,6 +70,7 @@ export function validateEvent(payload: unknown): ValidationResult {
   if (typeof p.reason === "string") event.reason = p.reason;
   if (typeof p.transcript_path === "string") event.transcript_path = p.transcript_path;
   if (typeof p.prompt === "string") event.prompt = p.prompt;
+  if (typeof p.source === "string") event.source = p.source;
   if (typeof p.task_subject === "string") event.task_subject = p.task_subject;
   if (typeof p.notification_type === "string") event.notification_type = p.notification_type;
   return { ok: true, event };
@@ -148,9 +151,12 @@ export function classifyNotification(message: string | undefined, notificationTy
  * - UserPromptSubmit → 実行中（OPEN-04 案 A 採用 — 2026-07-11。hooks へ自動追記される。design.md 4.1 / 4.5）
  * - TaskCreated → 実行中（タスク作成は作業中にしか起きない。260712_3）
  * - SessionEnd → 正常終了 reason なら null（状態を変えず破棄・ログのみ）、それ以外は「エラー」（OPEN-03 の検知できた範囲）
+ * - SessionStart → null（状態は作らない。同じプロジェクトの終了済み・切断の表示を消す。applyEvent 参照。260909_1）
  */
 export function mapEventToState(evt: HookEvent): SessionState | null {
   switch (evt.hook_event_name) {
+    case "SessionStart":
+      return null;
     case "Stop":
       return "done";
     case "Notification":
@@ -284,6 +290,8 @@ export interface ApplyResult {
    * 破棄しないと、実行中優先表示（displaySessions）が終了済みセッションを「実行中」として固定し続ける。
    */
   discardedRunning?: boolean;
+  /** SessionStart で消した同一プロジェクトの終了済み・切断セッション（260909_1。state は "waiting"） */
+  prunedSessions?: string[];
 }
 
 /**
@@ -304,6 +312,21 @@ export class StateStore extends EventEmitter {
   applyEvent(evt: HookEvent, projects: readonly Project[], opts?: { holdRunning?: boolean }): ApplyResult | null {
     const project = matchProjectByCwd(evt.cwd, projects);
     if (project === null) return null; // 破棄してログのみ（design.md 10 章）
+
+    if (evt.hook_event_name === "SessionStart") {
+      // 新しいセッションの開始（260909_1）: 表示は作らない（最初のプロンプトで実行中になる）。
+      // 同じプロジェクトの「終了済み」「切断」の記録は、もう見る意味が無いので消してタイルを待機へ戻す
+      // （2026-09-09 実測: Claude Code を再起動した後、前のセッションの「切断・8 分前」が最初のプロンプトまで残った）。
+      // 生存中の他セッション（実行中・完了・確認待ち）には触れない
+      const pruned: string[] = [];
+      for (const rec of this.sessions.values()) {
+        if (rec.projectId !== project.id) continue;
+        if (rec.dead === true || rec.state === "disconnected" || rec.sessionId === evt.session_id) pruned.push(rec.sessionId);
+      }
+      for (const sid of pruned) this.sessions.delete(sid);
+      if (pruned.length > 0) this.emit("changed");
+      return { projectId: project.id, sessionId: evt.session_id, state: "waiting", prunedSessions: pruned };
+    }
 
     let mapped = mapEventToState(evt);
     // 作業継続中の保持（260908_1）: 呼び出し側がループ進行中・バックグラウンド作業中と判定した Stop / Notification は

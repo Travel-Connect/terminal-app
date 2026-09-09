@@ -70,7 +70,7 @@ describe("findConcluded / findDisconnected: 保持中は終了検知・切断検
   });
 
   it("findDisconnected: transcript が HARD 閾値を超えて止まっていても held なら切断しない", () => {
-    const deps = { now: () => T0 + TRANSCRIPT_STALE_HARD_MS + 1, mtimeMs: () => T0, windowPresent: () => false, registryStatus: () => "idle" };
+    const deps = { now: () => T0 + TRANSCRIPT_STALE_HARD_MS + 1, mtimeMs: () => T0, windowPresent: () => false, registryStatus: () => undefined };
     expect(findDisconnected([target("a"), target("b")], { ...deps, heldReason: heldOnly("a") })).toEqual([target("b")]);
     expect(findDisconnected([target("a"), target("b")], deps)).toEqual([target("a"), target("b")]);
   });

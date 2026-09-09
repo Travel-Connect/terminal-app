@@ -94,6 +94,11 @@ export interface ConfirmResumeDeps {
   registryStatus(sessionId: string): string | undefined;
   /** 作業継続中の保持（260908_1）。許可要求（permission）以外の確認待ちは保持中なら実行中へ戻す */
   heldReason?: HeldReasonFn;
+  /**
+   * transcript 終端の分類（session-scan.turnEndOf を注入。260909_1）。渡した場合、transcript 更新による復帰は
+   * 終端が open（本当にターンが始まった）のときだけにする。メタ・ローカルコマンドの書き込みで復帰しないため
+   */
+  turnEnd?(path: string): "concluded" | "open" | "unknown";
 }
 
 export interface ConfirmResumeHit {
@@ -137,7 +142,40 @@ export function findResumedFromConfirm(targets: readonly ConfirmTarget[], deps: 
     if (t.transcriptPath === undefined) continue;
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue;
-    if (mtime >= t.lastEventAt + CONFIRM_RESUME_MARGIN_MS) out.push({ target: t, reason: "transcript" });
+    if (mtime < t.lastEventAt + CONFIRM_RESUME_MARGIN_MS) continue;
+    // 260909_1: 更新がターン開始（許可後のツール結果・プロンプト）でなければ復帰しない。2026-09-09 実測: 入力待ちのまま
+    // /effort /model を打つと transcript が動き、実行中へ戻って 15 分後に「切断」になった
+    if (deps.turnEnd !== undefined && deps.turnEnd(t.transcriptPath) !== "open") continue;
+    out.push({ target: t, reason: "transcript" });
+  }
+  return out;
+}
+
+export interface IdleConcludedDeps {
+  now(): number;
+  /** 最終活動時刻（session-scan.activityMtimeMs を注入）。取得不可は null */
+  mtimeMs(path: string): number | null;
+  /** Claude Code の登録簿 status */
+  registryStatus(sessionId: string): string | undefined;
+  /** 作業継続中の保持（260908_1）。保持中は対象外 */
+  heldReason?: HeldReasonFn;
+}
+
+/**
+ * 待機中の取り残し検知（260909_1）: 「実行中」なのに Claude Code の登録簿が idle と申告し、transcript が
+ * TRANSCRIPT_STALE_MS 以上動いていないセッション。プロセスは生きて入力待ちなので「切断」ではなく「完了」へ倒す。
+ * 背景: 終端分類が open のまま（メタ・ローカルコマンド等）だと終了検知が効かず、15 分後に切断へ誤って倒れていた。
+ * 登録簿 status が無い（Cursor 起動）・busy / shell / waiting は対象外（従来の判定に任せる）
+ */
+export function findIdleConcluded(targets: readonly SweepTarget[], deps: IdleConcludedDeps): SweepTarget[] {
+  const out: SweepTarget[] = [];
+  for (const t of targets) {
+    if (t.transcriptPath === undefined) continue;
+    if (deps.registryStatus(t.sessionId) !== "idle") continue;
+    if (deps.heldReason?.(t.sessionId) !== undefined) continue;
+    const mtime = deps.mtimeMs(t.transcriptPath);
+    if (mtime === null) continue;
+    if (deps.now() - mtime >= TRANSCRIPT_STALE_MS) out.push(t);
   }
   return out;
 }
@@ -267,7 +305,9 @@ export function findDisconnected(targets: readonly SweepTarget[], deps: SweepDep
   const out: SweepTarget[] = [];
   for (const t of targets) {
     if (t.transcriptPath === undefined) continue; // 実データが無ければ判定しない（安全側）
-    if (deps.registryStatus?.(t.sessionId) === "busy") continue; // 登録簿が作業中と申告している間は切断しない（260907_1 R4）
+    const status = deps.registryStatus?.(t.sessionId);
+    if (status === "busy") continue; // 登録簿が作業中と申告している間は切断しない（260907_1 R4）
+    if (status === "idle") continue; // 生きて入力待ち = 切断ではない（260909_1。findIdleConcluded が「完了」へ倒す）
     if (deps.heldReason?.(t.sessionId) !== undefined) continue; // 作業継続中の保持（260908_1）
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue; // stat 失敗（消失・権限）も安全側 — 一時的な失敗で切断を誤宣言しない

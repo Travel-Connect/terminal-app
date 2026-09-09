@@ -30,6 +30,7 @@ import {
   STOPPED_RESUME_MIN_AGE_MS,
   findConcluded,
   findDisconnected,
+  findIdleConcluded,
   findResumedFromConfirm,
   findResumedFromStopped,
   type StoppedResumeDeps,
@@ -399,6 +400,21 @@ function createAppEventServer(): EventServer {
         logger.info(`event 破棄: ${evt.hook_event_name} cwd=${evt.cwd}`);
         return;
       }
+      if (evt.hook_event_name === "SessionStart") {
+        // 新しいセッションの開始（260909_1）: 同じプロジェクトの終了済み・切断の記録を消した。表示は待機へ戻る
+        for (const sid of result.prunedSessions ?? []) {
+          cancelPendingStopCheck(sid);
+          lastNotifiedState.delete(sid);
+          heldSessions.delete(sid);
+          releasedPendingToast.delete(sid);
+          loopStatusCache.delete(sid);
+        }
+        logger.info(
+          `event 受信: SessionStart（source=${evt.source ?? "?"}）→ 終了済み・切断の記録を ${result.prunedSessions?.length ?? 0} 件消去 (project=${result.projectId}, session=${result.sessionId})`
+        );
+        broadcast(receivedAt);
+        return;
+      }
       if (result.discardedRunning === true) {
         // 正常 SessionEnd: 実行中のまま終了したセッションの記録を破棄（260712 課題A の幽霊実行中防止）
         logger.info(`event 受信: SessionEnd（正常終了）→ 実行中セッションの記録を破棄 (project=${result.projectId}, session=${result.sessionId})`);
@@ -625,6 +641,7 @@ function sweepLiveness(): void {
       mtimeMs: statMtimeMs,
       registryStatus: (sid) => registryStatusOf(registry, sid),
       heldReason: held,
+      turnEnd: turnEndOf,
     });
     for (const hit of resumed) {
       if (!stateStore.resumeFromConfirm(hit.target.sessionId)) continue;
@@ -676,6 +693,21 @@ function sweepLiveness(): void {
     if (releasedPendingToast.has(t.sessionId) && shouldNotify(lastNotifiedState.get(t.sessionId), "done")) {
       showReleasedToast(t.sessionId, project);
     }
+    releasedPendingToast.delete(t.sessionId);
+  }
+
+  // (2') 待機中の取り残し（260909_1）: 登録簿 idle のまま transcript が止まっているものは「完了」へ（切断ではない）
+  for (const t of findIdleConcluded(targets.filter((t) => !concludedIds.has(t.sessionId)), {
+    now: () => Date.now(),
+    mtimeMs: activityMtimeMs,
+    registryStatus: (sid) => registryStatusOf(registry, sid),
+    heldReason: held,
+  })) {
+    if (!stateStore.markConcluded(t.sessionId)) continue;
+    changed = true;
+    concludedIds.add(t.sessionId);
+    const project = projectStore.getProject(t.projectId);
+    logger.info(`終了検知: ${project?.name ?? t.projectId} (session=${t.sessionId}) — 登録簿 status=idle のまま transcript が無更新のため「完了」へ`);
     releasedPendingToast.delete(t.sessionId);
   }
 
