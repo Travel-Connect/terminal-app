@@ -11,6 +11,11 @@
  * - codex ジョブ `turns/turn-NNN-<plan|generator>-progress.log` … codex-common.sh の codex_exec_progress が
  *   PHASE_START 行で始め、無音 60 秒ごとに ♥ 行、PHASE_END 行で必ず閉じる。「走行中」= PHASE_END が無く
  *   mtime が JOB_STALE_MS 以内
+ * - **task 未設定の state は無視する（260908_2）**: プラグインの SubagentStart hook は全 subagent に active=true の
+ *   state を事前作成し、ループを使わない subagent のものは誰も閉じない（SubagentStop は Task 起動で確実には
+ *   発火しない — anthropics/claude-code#27755。プラグインの never_started GC は UserPromptSubmit 時のみ）。
+ *   2026-09-09 実測: 終わったループの隣に task="" / iteration 0/12 の残骸が 3 つ残り、タイルが回り続けた。
+ *   loop-control.sh と同じ規則（task が空 or "task not set" = ループ未開始）で除外する
  *
  * 表示は 1 行: 「ループ 2/4・codex 実装中 1分・最高 78点」（周回数は 1 始まり）。終了後は ENDED_SHOW_MS の間だけ
  * 「ループ終了・合格 92点」。LLM の自己申告に依存せず、読めない・壊れているものは黙って無視する（バッジ無し）。
@@ -36,6 +41,8 @@ export interface LoopState {
   turnsDir?: string;
   /** state.json の mtime（epoch ms。ファイル由来のときだけ。停滞判定に使う） */
   mtimeMs?: number;
+  /** task が設定済み（= ループが実際に始まっている）。未設定は SubagentStart の事前作成 state の残骸（260908_2） */
+  hasTask: boolean;
 }
 
 export interface RunningJob {
@@ -98,10 +105,12 @@ export function parseLoopState(text: string, fileMtimeMs?: number): LoopState | 
   if (typeof r.active !== "boolean") return null;
   const iteration = num(r.iteration);
   const max = num(r.max_iterations);
+  const task = str(r.task);
   const s: LoopState = {
     active: r.active,
     iteration: iteration !== undefined && iteration >= 0 ? Math.floor(iteration) : 0,
     maxIterations: max !== undefined && max > 0 ? Math.floor(max) : 12, // loop-control.sh の既定
+    hasTask: task !== undefined && task.trim() !== "" && task !== "task not set",
   };
   const phase = str(r.phase);
   if (phase !== undefined) s.phase = phase;
@@ -234,6 +243,7 @@ function readStateFile(statePath: string): LoopState | null {
   const m = mtimeMs(statePath);
   const state = parseLoopState(text, m ?? undefined);
   if (state === null) return null;
+  if (!state.hasTask) return null; // ループ未開始の事前作成 state（残骸）は存在しないものとして扱う（260908_2）
   if (state.turnsDir === undefined) state.turnsDir = path.join(path.dirname(statePath), "turns");
   return state;
 }

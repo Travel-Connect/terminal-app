@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Project } from "../src/shared/types";
-import { isTaskNotificationPrompt, StateStore, type HookEvent } from "../src/main/state-store";
+import { classifyNotification, isTaskNotificationPrompt, StateStore, validateEvent, type HookEvent } from "../src/main/state-store";
 
 function project(id: string, p: string): Project {
   return { id, name: p.split("\\").pop() ?? p, path: p, clickTarget: "cursor", registeredAt: "2026-09-08T00:00:00Z" };
@@ -35,6 +35,35 @@ describe("isTaskNotificationPrompt", () => {
     expect(isTaskNotificationPrompt("動いてる？")).toBe(false);
     expect(isTaskNotificationPrompt("<command-name>/foo</command-name>")).toBe(false);
     expect(isTaskNotificationPrompt(undefined)).toBe(false);
+  });
+});
+
+describe("classifyNotification（260908_2: 公式 notification_type を優先）", () => {
+  it("permission_prompt / elicitation_* / agent_needs_input → permission、idle_prompt → idle、他 → other。文言は見ない", () => {
+    expect(classifyNotification("Claude is waiting for your input", "permission_prompt")).toBe("permission");
+    expect(classifyNotification("x", "elicitation_dialog")).toBe("permission");
+    expect(classifyNotification("x", "elicitation_url_dialog")).toBe("permission");
+    expect(classifyNotification("x", "agent_needs_input")).toBe("permission");
+    expect(classifyNotification("Claude needs your permission", "idle_prompt")).toBe("idle");
+    expect(classifyNotification("x", "auth_success")).toBe("other");
+    expect(classifyNotification("x", "agent_completed")).toBe("other");
+    expect(classifyNotification("x", "quota_auto_resume_fired")).toBe("other");
+  });
+
+  it("notification_type が無い・空なら従来どおり message の文言で推定する", () => {
+    expect(classifyNotification("Claude needs your permission to use Bash")).toBe("permission");
+    expect(classifyNotification("Claude is waiting for your input", "")).toBe("idle");
+    expect(classifyNotification("something")).toBe("other");
+    expect(classifyNotification(undefined)).toBe("other");
+  });
+
+  it("validateEvent は notification_type を保持し、applyEvent の確認待ち種別に反映する", () => {
+    const r = validateEvent({ hook_event_name: "Notification", session_id: "s1", cwd: "C:\\dev\\Pricefluctuation-app", message: "Claude is waiting for your input", notification_type: "agent_needs_input" });
+    expect(r.ok && r.event.notification_type).toBe("agent_needs_input");
+    const { store } = storeAt();
+    store.applyEvent(evt("UserPromptSubmit", "s1", { prompt: "x" }), projects);
+    store.applyEvent(evt("Notification", "s1", { message: "Claude is waiting for your input", notification_type: "agent_needs_input" }), projects);
+    expect(store.confirmSessions()).toMatchObject([{ sessionId: "s1", kind: "permission" }]);
   });
 });
 

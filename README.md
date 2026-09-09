@@ -82,6 +82,11 @@ start-app.bat
   idle / waiting 以外（例: バックグラウンドの shell が残っている `shell`）。通知による起床では作業テキストを上書きしない。
   許可要求の Notification はループ中でも「確認待ち」（人の応答が要る）。保持が解けて完了になったとき（ループ終了・バックグラウンド作業終了）に
   初めて完了トーストを出し、ループが終わっていれば本文に「ループ終了・合格 92点」を添える。
+- **残骸 state の無視と通知種別の公式化（260908_2）**: eval-loop プラグインはサブエージェント起動時に `.mso/agents/<id>/state.json` を
+  active=true で事前作成し、ループを使わなかったサブエージェントの分は閉じられずに残ることがある（task が空のまま）。
+  この残骸を「ループ進行中」と読んでタイルが回り続けたため、task 未設定の state は存在しないものとして扱う（バッジ・保持ともに対象外。
+  プラグインの loop-control.sh と同じ規則）。Notification の種別は公式の `notification_type`
+  （permission_prompt / idle_prompt / elicitation_* / agent_needs_input 等）で判定し、無いときだけ文言で推定する。
 - **分割タイル（260904_1 #3）**: 1 つのフォルダで 2 本以上の claude が同時に動いている（Cursor の複数ターミナル等）と、
   タイルが「名前 ①」「名前 ②」（起動順）に自動で分かれ、それぞれの状態・作業テキストが見える。1 本に戻れば元の 1 タイルへ。
   生死は Claude Code 自身が書く登録簿（`%USERPROFILE%\.claude\sessions\<pid>.json`）とプロセス存在で判定するため、

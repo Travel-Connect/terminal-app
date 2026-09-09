@@ -36,6 +36,7 @@ const REAL_STATE = {
   session_id: "632eda45-2131-4192-aaaf-5f6c4cf5baf1",
   agent_id: null,
   project_dir: "C:/dev/Pricefluctuation-app",
+  task: "ホットキー（キーボードショートカット）設定機能を構築する。",
   latest_score: null,
   best_score: null,
   turns_dir: "C:/dev/Pricefluctuation-app/.mso/sessions/632eda45-2131-4192-aaaf-5f6c4cf5baf1/turns",
@@ -45,7 +46,7 @@ const REAL_STATE = {
 };
 
 function state(over: Partial<LoopState> = {}): LoopState {
-  return { active: true, iteration: 0, maxIterations: 4, ...over };
+  return { active: true, iteration: 0, maxIterations: 4, hasTask: true, ...over };
 }
 
 describe("parseLoopState", () => {
@@ -59,7 +60,16 @@ describe("parseLoopState", () => {
       sessionId: "632eda45-2131-4192-aaaf-5f6c4cf5baf1",
       turnsDir: REAL_STATE.turns_dir,
       mtimeMs: NOW,
+      hasTask: true,
     });
+  });
+
+  it("task が空・\"task not set\"・欠落 は hasTask=false（SubagentStart の事前作成 state = ループ未開始。260908_2）", () => {
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "" }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "task not set" }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "  " }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ active: true }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify(REAL_STATE))?.hasTask).toBe(true);
   });
 
   it("終了した state: ended_at があればそれ、無ければ（プラグイン v0.2 は書かない）ファイル mtime を終了時刻にする", () => {
@@ -75,7 +85,7 @@ describe("parseLoopState", () => {
     expect(parseLoopState("{")).toBe(null);
     expect(parseLoopState("[1]")).toBe(null);
     expect(parseLoopState(JSON.stringify({ iteration: 1 }))).toBe(null);
-    expect(parseLoopState(JSON.stringify({ active: true }))).toEqual({ active: true, iteration: 0, maxIterations: 12 });
+    expect(parseLoopState(JSON.stringify({ active: true }))).toEqual({ active: true, iteration: 0, maxIterations: 12, hasTask: false });
   });
 });
 
@@ -213,6 +223,21 @@ describe("readRunningJob / findLoopsForSession / loopStatusForSessions（ファ�
     expect(loops).toHaveLength(1);
     expect(summarizeLoops(loops, NOW)).toEqual({ active: false, job: null });
     expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).size).toBe(0);
+  });
+
+  it("task 未設定の active な state（事前作成の残骸）は存在しない扱い: 保持も「（他 N 本）」もバッジも出ない（260908_2）", () => {
+    // 2026-09-09 実測: 終わった直列ループの隣に task="" / iteration 0/12 の agents state が 3 つ残り、
+    // 「ループ 1/12・計画中（他 2 本）」で保持され続けた
+    writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", active: false, ended_reason: "threshold_met", latest_score: 91 }, 60_000);
+    for (const a of ["a23e90ad45bf", "a859d90c042c", "aa35d16707f2"]) {
+      writeState(dir, "agents", a, { loop_type: "eval", active: true, iteration: 0, max_iterations: 12, threshold: 70, phase: "plan", task: "", session_id: "s1", agent_id: a });
+    }
+    writeState(dir, "agents", "notset", { loop_type: "eval", active: true, iteration: 0, max_iterations: 12, phase: "plan", task: "task not set", session_id: "s1", agent_id: "notset" });
+    expect(findLoopsForSession({ sessionId: "s1", cwd: dir, projectPath: dir })).toHaveLength(1);
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).get("s1")).toEqual({ active: false, job: null, text: "ループ終了・合格 91点" });
+    // task が入った本物の fork ループなら拾う
+    writeState(dir, "agents", "real", { ...REAL_STATE, session_id: "s1", agent_id: "real", phase: "generator" });
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).get("s1")).toMatchObject({ active: true, text: "ループ 1/4・実装中" });
   });
 
   it("state が無い・壊れている・.mso 自体が無い・区切り文字入りの id → そのセッションは無し（例外を出さない）", () => {

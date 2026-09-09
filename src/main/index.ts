@@ -387,7 +387,7 @@ function createAppEventServer(): EventServer {
       // 完了待ちなら「完了」「確認待ち」にせず実行中を保つ（Monitor 起床のたびに Stop が来る司令塔セッション向け）
       const holdCandidate =
         evt.hook_event_name === "Stop" ||
-        (evt.hook_event_name === "Notification" && classifyNotification(evt.message) !== "permission");
+        (evt.hook_event_name === "Notification" && classifyNotification(evt.message, evt.notification_type) !== "permission");
       let hold: string | undefined;
       if (holdCandidate) {
         refreshLoopStatusForEvent(evt.session_id, evt.cwd);
@@ -403,7 +403,10 @@ function createAppEventServer(): EventServer {
         // 正常 SessionEnd: 実行中のまま終了したセッションの記録を破棄（260712 課題A の幽霊実行中防止）
         logger.info(`event 受信: SessionEnd（正常終了）→ 実行中セッションの記録を破棄 (project=${result.projectId}, session=${result.sessionId})`);
       } else {
-        const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
+        const detail =
+          evt.hook_event_name === "Notification"
+            ? ` 種別=${classifyNotification(evt.message, evt.notification_type)}${evt.notification_type !== undefined ? `(${evt.notification_type})` : ""}`
+            : "";
         const heldNote = hold !== undefined ? `（実行中を維持: ${hold}）` : "";
         logger.info(
           `event 受信: ${evt.hook_event_name}${detail} → ${result.state}${heldNote} (project=${result.projectId}, session=${result.sessionId})`

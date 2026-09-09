@@ -14,6 +14,8 @@
  *     終了後の Stop → 完了になる
  * (g) バックグラウンド作業の完了待ち: task-notification で起床（作業テキストは維持）→ Stop でも登録簿 status=shell の間は実行中、
  *     status=idle になったら掃引の終了検知で完了
+ * (h) 260908_2: c には task="" の事前作成 state（SubagentStart の残骸）が 3 つあるが、バッジも保持も出ない。
+ *     Notification は公式 notification_type で分類（idle_prompt は文言が permission 風でも保持、agent_needs_input は確認待ち）
  *
  * 使い方: npm run build 後に node scripts/verify-loop-badge-e2e.mjs [出力先ディレクトリ]
  * 実 ~/.claude/sessions と実プロジェクトには触れない。掃引 2 秒。実稼働アプリ（既定 41321）と並走できる。
@@ -55,12 +57,19 @@ fs.mkdirSync(path.join(stateA, "turns"), { recursive: true });
 fs.mkdirSync(path.join(stateB, "turns"), { recursive: true });
 const writeState = (dir, obj, mtimeAgeMs = 0) => {
   const p = path.join(dir, "state.json");
-  fs.writeFileSync(p, JSON.stringify({ loop_type: "eval", turns_dir: fwd(path.join(dir, "turns")), ...obj }));
+  // task は本物のループの印（loop-start.sh が書く）。残骸を作るときは obj 側で task: "" を渡して上書きする（260908_2）
+  fs.writeFileSync(p, JSON.stringify({ loop_type: "eval", task: "E2E: ループの疑似タスク", turns_dir: fwd(path.join(dir, "turns")), ...obj }));
   const t = new Date(Date.now() - mtimeAgeMs);
   fs.utimesSync(p, t, t);
 };
 writeState(stateA, { active: true, iteration: 1, max_iterations: 4, threshold: 90, phase: "generator", best_score: 78, session_id: S.a, agent_id: null, generator_skill: "assign-codex-generator" });
 writeState(stateB, { active: true, iteration: 0, max_iterations: 4, threshold: 90, phase: "evaluator", session_id: S.b, agent_id: AGENT });
+// (h) c: ループ未開始の事前作成 state の残骸（task=""・iteration 0/12・active=true）。2026-09-09 実測と同じ形
+for (const agent of ["a23e90ad45bfbd53c", "a859d90c042c81c5a", "aa35d16707f2a5f4b"]) {
+  const d = path.join(projDir("c"), ".mso", "agents", agent);
+  fs.mkdirSync(path.join(d, "turns"), { recursive: true });
+  writeState(d, { active: true, iteration: 0, max_iterations: 12, threshold: 70, phase: "plan", task: "", session_id: S.c, agent_id: agent }, 2 * 3600_000);
+}
 const progressA = path.join(stateA, "turns", "turn-001-generator-progress.log");
 fs.writeFileSync(progressA, "[17:08:00 +0m00s] generator#001 PHASE_START model=gpt-6-astra effort=xhigh sandbox=workspace-write\n[17:09:00 +1m00s] generator#001 ♥\n");
 
@@ -189,7 +198,7 @@ try {
   let v = await view();
   check("(a) sessions 配置のループ: 2 周目・codex 実装中 0 分・最高 78 点", v.a, "ループ 2/4・codex 実装中 0分・最高 78点");
   check("(b) agents 配置（fork）のループ: session_id で対応付き 採点中", v.b, "ループ 1/4・採点中");
-  check("(c) ループの無いセッションにはバッジ無し", v.c, null);
+  check("(c)(h) ループの無いセッション（task 未設定の残骸 3 つだけ）にはバッジ無し", v.c, null);
   check("描画: a/b はバッジ表示・c は行ごと非表示", v.dom, {
     "p-a": { loop: "ループ 2/4・codex 実装中 0分・最高 78点", row: true },
     "p-b": { loop: "ループ 1/4・採点中", row: true },
@@ -205,12 +214,13 @@ try {
   v = await view();
   check("(f) ループ進行中の Stop → 実行中のまま（登録簿 idle でも）", v.state.a, "running");
   check("ログ: Stop を実行中維持で受けた記録", logFile().includes(`event 受信: Stop → running（実行中を維持: ループ進行中（ループ 2/4・codex 実装中 0分・最高 78点）） (project=p-a, session=${S.a})`), true);
-  check("(f) 注入 Notification idle（a）", await inject("a", { hook_event_name: "Notification", message: "Claude is waiting for your input" }), 204);
+  check("(f) 注入 Notification idle_prompt（a。文言は permission 風でも種別を優先）", await inject("a", { hook_event_name: "Notification", message: "permission?", notification_type: "idle_prompt" }), 204);
   await sleep(SWEEP_MS + 500);
   check("(f) ループ進行中の入力待ち通知 → 確認待ちにならない", (await view()).state.a, "running");
-  check("(f) 注入 Notification permission（a）", await inject("a", { hook_event_name: "Notification", message: "Claude needs your permission to use Bash" }), 204);
+  check("ログ: 種別に notification_type を併記", logFile().includes("Notification 種別=idle(idle_prompt) → running"), true);
+  check("(f) 注入 Notification agent_needs_input（a）", await inject("a", { hook_event_name: "Notification", message: "Claude is waiting for your input", notification_type: "agent_needs_input" }), 204);
   await sleep(300);
-  check("(f) 許可要求はループ中でも確認待ち", (await view()).state.a, "confirm");
+  check("(f) 人の応答が要る種別はループ中でも確認待ち", (await view()).state.a, "confirm");
   await sleep(SWEEP_MS + 500);
   check("(f) 許可要求の確認待ちは掃引でも戻らない（人の応答待ち）", (await view()).state.a, "confirm");
   writeTranscript("a", "open");
@@ -236,6 +246,16 @@ try {
   check("(e) 注入 Stop（a・ループ終了後）", await inject("a", { hook_event_name: "Stop" }), 204);
   await sleep(4500);
   check("(e) ループ終了後の Stop → 完了", (await view()).state.a, "done");
+
+  // (h) 残骸 state だけのセッション c: 人のプロンプト後の Stop は従来どおり完了になる（残骸で保持されない）
+  writeTranscript("c", "concluded");
+  check("(h) 注入 Stop（c・残骸 state 3 つあり）", await inject("c", { hook_event_name: "Stop" }), 204);
+  await sleep(4500);
+  check("(h) task 未設定の残骸では保持されず完了になる", (await view()).state.c, "done");
+  check("ログ: 残骸（ループ 1/12）で保持された記録は無い", logFile().includes("実行中を維持: ループ進行中（ループ 1/12"), false);
+  writeTranscript("c", "open");
+  check("(h) 注入 UserPromptSubmit（c）", await inject("c", { hook_event_name: "UserPromptSubmit", prompt: "ループ c" }), 204);
+  await sleep(300);
 
   // (g) バックグラウンド作業の完了待ち（c: 登録簿 status=shell）
   check("(g) 注入 UserPromptSubmit（c・task-notification）", await inject("c", { hook_event_name: "UserPromptSubmit", prompt: TASK_NOTIFICATION }), 204);

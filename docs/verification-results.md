@@ -287,3 +287,19 @@ clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
 
 - 手動枠: 実ループでのトースト（保持中は出ず、ループ終了の Stop 後に「ループ終了・合格 NN点」付きで 1 回）は Windows 通知のため CDP では検証できない。
   稼働アプリの `app.log` で「実行中を維持」「保持を解除 → 完了」を確認する。
+
+### 8.8 追記: 260908_2 残骸 state の無視・通知種別の公式化（V-23 / V-24。証跡 = `docs/evidence/20260909-remnant/`）
+
+- 発端（2026-09-09 10:39 ユーザー報告・実測）: Pricefluctuation-app のループは 2026-09-08 19:06 に threshold_met で終わっているのに、
+  タイルは「ループ 1/12・計画中（他 2 本）」で実行中のまま（0:14:56）。`.mso/agents/` に `active=true` / `task=""` / `iteration 0/12` の
+  事前作成 state が 3 つ残り、保持の根拠になっていた。プラグインの never_started GC を手動で実行すると閉じる（hook は 0.2.2 と同一内容）が、
+  稼働セッションでは効いていなかった（原因は未特定。プラグイン側の課題として記録）。
+- 参考（firecrawl 検索 3 件・公式 hooks reference の scrape）: Notification hook は `notification_type`（permission_prompt / idle_prompt /
+  elicitation_dialog / elicitation_url_dialog / agent_needs_input / agent_completed / quota_auto_resume_* 等）を持つ。SubagentStart / SubagentStop は
+  Task 起動で確実には発火しない（anthropics/claude-code#27755）。Stop は `stop_hook_active` / `last_assistant_message` を持つ（transcript は遅延しうる）。
+- 自動テスト: `tests/eval-loop-status.test.ts` に残骸の無視 2 件、`tests/state-store-held.test.ts` に notification_type の分類 3 件を追加。
+  `npm test`: **54 ファイル / 480 テスト全件 green**。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E（`node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260909-remnant`。35 項目すべて OK）: (h) セッション c に task="" の残骸 state を
+  3 つ置いてもバッジ無し・Stop で完了（保持されない）。(f) `notification_type: idle_prompt` は文言が permission 風でも保持、`agent_needs_input` は確認待ち。
+  ログに「種別=idle(idle_prompt)」を併記。既存 (a)〜(g) は全件 OK のまま（本物のループ state には task を書くようにした）。
+- 稼働アプリ: 手動 GC の直後の掃引（01:44:44Z）で「保持を解除 → 終了検知 → 完了」を確認。新ビルドで再起動。

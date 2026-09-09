@@ -29,6 +29,11 @@ export interface HookEvent {
   prompt?: string;
   /** TaskCreated のみ: 作成されたタスクの件名（作業テキストの実データ源。260712_3） */
   task_subject?: string;
+  /**
+   * Notification のみ: 通知種別（公式 hooks reference。permission_prompt / idle_prompt / elicitation_dialog /
+   * elicitation_url_dialog / agent_needs_input / agent_completed / quota_auto_resume_* 等。260908_2 で受理）
+   */
+  notification_type?: string;
 }
 
 /** SessionEnd の正常終了 reason（design.md 4.8。これ以外・欠落は「エラー相当」と判定する） */
@@ -64,6 +69,7 @@ export function validateEvent(payload: unknown): ValidationResult {
   if (typeof p.transcript_path === "string") event.transcript_path = p.transcript_path;
   if (typeof p.prompt === "string") event.prompt = p.prompt;
   if (typeof p.task_subject === "string") event.task_subject = p.task_subject;
+  if (typeof p.notification_type === "string") event.notification_type = p.notification_type;
   return { ok: true, event };
 }
 
@@ -106,12 +112,28 @@ export function blockReasonToWorkText(reason: string): string | undefined {
 }
 
 /**
- * Notification message の種別分類（design.md 4.3）。
- * いずれの種別でも遷移先は「確認待ち」（安全側）。分類はログ・将来の出し分け用。
+ * Notification の種別分類（design.md 4.3。260908_2 で公式 `notification_type` を優先）。
+ * - permission = 人の応答が要る（permission_prompt / elicitation_dialog / elicitation_url_dialog / agent_needs_input）。
+ *   ループ中・バックグラウンド作業中でも「確認待ち」にする
+ * - idle = 応答完了から約 60 秒無操作（idle_prompt）。作業継続中の保持の対象
+ * - other = それ以外（auth_success / agent_completed / quota_auto_resume_* / 不明）
+ * notification_type が無い（旧版・擬似注入）ときは message の文言で推定する（従来どおり）。
  */
 export type NotificationKind = "permission" | "idle" | "other";
 
-export function classifyNotification(message: string | undefined): NotificationKind {
+const PERMISSION_NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
+  "permission_prompt",
+  "elicitation_dialog",
+  "elicitation_url_dialog",
+  "agent_needs_input",
+]);
+
+export function classifyNotification(message: string | undefined, notificationType?: string): NotificationKind {
+  if (notificationType !== undefined && notificationType !== "") {
+    if (PERMISSION_NOTIFICATION_TYPES.has(notificationType)) return "permission";
+    if (notificationType === "idle_prompt") return "idle";
+    return "other";
+  }
   if (!message) return "other";
   const m = message.toLowerCase();
   if (m.includes("permission") || m.includes("許可")) return "permission";
@@ -332,7 +354,7 @@ export class StateStore extends EventEmitter {
     rec.cwd = evt.cwd;
     if (evt.hook_event_name === "Notification") {
       rec.lastMessage = evt.message;
-      rec.confirmKind = classifyNotification(evt.message);
+      rec.confirmKind = classifyNotification(evt.message, evt.notification_type);
     }
     if (evt.hook_event_name === "UserPromptSubmit") {
       if (isTaskNotificationPrompt(evt.prompt)) {
