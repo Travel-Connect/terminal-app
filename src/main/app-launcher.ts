@@ -2,7 +2,7 @@
  * 立ち上げ（260717_1）: 閉じていた Cursor / ターミナルをプロジェクトフォルダ付きで起動する。
  * 前面化（window-control）は既存ウィンドウの探索のみで、対象アプリが閉じていると
  * 「ウィンドウが見つかりません」で終わる — その場面からの手動復帰導線（タイル右クリック →「立ち上げる」）。
- * - cursor: `Cursor.exe <projectPath>`。インストール先は PATH の `cursor\resources\app\bin`
+ * - cursor: `Cursor.exe --new-window <projectPath>`。インストール先は PATH の `resources\app\bin`
  *   エントリから逆算 → 既定パス（%LOCALAPPDATA%\Programs\cursor / %ProgramFiles%\cursor）の順で解決
  * - terminal: `wt.exe -d <projectPath>`（Windows Terminal。PATH → WindowsApps エイリアスの順で解決）
  * 解決ロジックは resolveLaunchCommand に分離し、env と存在確認を注入してテスト可能にする
@@ -32,7 +32,7 @@ function pathDirs(env: ResolveDeps["env"]): string[] {
   const raw = env.PATH ?? env.Path ?? "";
   return raw
     .split(path.delimiter)
-    .map((d) => d.trim())
+    .map((d) => d.trim().replace(/^"(.*)"$/, "$1"))
     .filter((d) => d !== "");
 }
 
@@ -42,9 +42,12 @@ function pathDirs(env: ResolveDeps["env"]): string[] {
  * Cursor.exe を導出する（ユーザーが実際に使っているインストールを最優先にする狙い）。
  */
 function cursorCandidates(deps: ResolveDeps): string[] {
-  const fromPath = pathDirs(deps.env)
-    .filter((d) => /cursor[\\/]resources[\\/]app[\\/]bin[\\/]?$/i.test(d))
-    .map((d) => path.join(d, "..", "..", "..", "Cursor.exe"));
+  const fromPath = pathDirs(deps.env).flatMap((d) => {
+    const direct = path.join(d, "Cursor.exe");
+    return /[\\/]resources[\\/]app[\\/]bin[\\/]?$/i.test(d)
+      ? [path.join(d, "..", "..", "..", "Cursor.exe"), direct]
+      : [direct];
+  });
   const fixed = [
     deps.env.LOCALAPPDATA !== undefined ? path.join(deps.env.LOCALAPPDATA, "Programs", "cursor", "Cursor.exe") : null,
     deps.env.ProgramFiles !== undefined ? path.join(deps.env.ProgramFiles, "cursor", "Cursor.exe") : null,
@@ -74,7 +77,7 @@ export function resolveLaunchCommand(
 ): LaunchCommand | null {
   if (target === "cursor") {
     const exe = cursorCandidates(deps).find(deps.exists);
-    return exe !== undefined ? { exe, args: [projectPath] } : null;
+    return exe !== undefined ? { exe, args: ["--new-window", projectPath] } : null;
   }
   const exe = terminalCandidates(deps).find(deps.exists);
   return exe !== undefined ? { exe, args: ["-d", projectPath] } : null;
@@ -97,8 +100,15 @@ function fileExists(p: string): boolean {
  * 対象アプリをプロジェクトフォルダ付きで起動する（detach して本アプリと生存を切り離す）。
  * 起動の成否 = spawn の受理まで（アプリ側の初期化失敗までは追わない）
  */
-export function launchProjectApp(target: ClickTarget, projectPath: string): LaunchOutcome {
-  const cmd = resolveLaunchCommand(target, projectPath, { env: process.env, exists: fileExists });
+export async function launchProjectApp(
+  target: ClickTarget,
+  projectPath: string,
+  workspacePath?: string
+): Promise<LaunchOutcome> {
+  const cmd = resolveLaunchCommand(target, target === "cursor" ? workspacePath ?? projectPath : projectPath, {
+    env: process.env,
+    exists: fileExists,
+  });
   if (cmd === null) {
     return {
       ok: false,
@@ -108,11 +118,21 @@ export function launchProjectApp(target: ClickTarget, projectPath: string): Laun
           : "Windows Terminal（wt.exe）が見つかりません",
     };
   }
-  try {
-    const child = spawn(cmd.exe, cmd.args, { detached: true, stdio: "ignore" });
-    child.unref();
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: `立ち上げに失敗しました: ${String(e)}` };
+  // IDE 内から本アプリを起動した場合も、子アプリを Node モードや元の IDE の cwd へ誘導しない。
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (["ELECTRON_RUN_AS_NODE", "VSCODE_CWD", "VSCODE_IPC_HOOK_CLI"].includes(key.toUpperCase())) delete env[key];
   }
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(cmd.exe, cmd.args, { detached: true, stdio: "ignore", cwd: projectPath, env });
+      child.once("error", (e) => resolve({ ok: false, message: `立ち上げに失敗しました: ${String(e)}` }));
+      child.once("spawn", () => {
+        child.unref();
+        resolve({ ok: true });
+      });
+    } catch (e) {
+      resolve({ ok: false, message: `立ち上げに失敗しました: ${String(e)}` });
+    }
+  });
 }

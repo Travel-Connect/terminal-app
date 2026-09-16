@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../src/shared/types";
 import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS } from "../src/main/window-presence";
+import { matchesProjectWindow } from "../src/main/window-control";
 
 function proj(id: string, dir: string, clickTarget: Project["clickTarget"] = "cursor"): Project {
   return { id, name: id, path: dir, clickTarget, registeredAt: "2026-09-03T00:00:00.000Z" };
@@ -54,6 +55,26 @@ describe("computeWindowPresence（260903_1）", () => {
   it("ウィンドウが 1 つも無ければ全プロジェクトが未接続、プロジェクトが無ければ空", () => {
     expect(computeWindowPresence([proj("a", "C:/x/a"), proj("b", "C:/x/b", "terminal")], [])).toEqual({ a: false, b: false });
     expect(computeWindowPresence([], windows)).toEqual({});
+  });
+
+  it("workspace 名で開いた Cursor はフォルダ名がタイトルに無くても検出する", () => {
+    const project = { ...proj("p1", "C:/dev/api"), workspacePath: "C:/workspaces/Team.code-workspace" };
+    const window = { title: "index.ts — Team (Workspace) — Cursor", exe: "C:\\Program Files\\cursor\\Cursor.exe", className: "Chrome_WidgetWin_2" };
+    expect(computeWindowPresence([project], [window])).toEqual({ p1: true });
+    expect(matchesProjectWindow("cursor", "api", window, project.workspacePath)).toBe(true);
+    expect(computeWindowPresence([{ ...project, workspacePath: undefined }], [window])).toEqual({ p1: false });
+  });
+
+  it("Chromium のクラス名や Cursor を含むタイトルだけで別アプリを拾わない", () => {
+    const project = { ...proj("p1", "C:/dev/api"), workspacePath: "C:/workspaces/Team.code-workspace" };
+    const window = { title: "api — Team — Cursor", exe: "chrome.exe", className: "Chrome_WidgetWin_1" };
+    expect(computeWindowPresence([project], [window])).toEqual({ p1: false });
+    expect(matchesProjectWindow("cursor", "", { title: "other — Cursor", exe: "cursor.exe" })).toBe(false);
+  });
+
+  it("ターミナルは workspace 名を流用せず対象のフォルダ名で検出する", () => {
+    const project = { ...proj("p1", "C:/dev/api", "terminal"), workspacePath: "C:/workspaces/Team.code-workspace" };
+    expect(computeWindowPresence([project], [{ title: "Team", exe: "WindowsTerminal.exe" }])).toEqual({ p1: false });
   });
 });
 

@@ -107,6 +107,9 @@ export class ProjectStore {
     }
     // 記憶したウィンドウ位置（260904_1 #3）: 壊れた値は捨てる（SetWindowPlacement に不正値を渡さない）
     for (const p of this._projects) {
+      if (typeof p.workspacePath !== "string" || !path.isAbsolute(p.workspacePath) || path.extname(p.workspacePath).toLowerCase() !== ".code-workspace") {
+        delete p.workspacePath;
+      }
       if (p.windowBounds === undefined) continue;
       const parsed = parseWindowBounds(p.windowBounds);
       if (parsed === null) {
@@ -141,7 +144,7 @@ export class ProjectStore {
    * D&D 登録（REQ-01 / design.md 3.2(a)）。
    * 検証は validateProjectDir に集約（実在ディレクトリ・重複なし）。name はフォルダ basename を既定とする。
    */
-  addProject(dirPath: string, clickTarget: ClickTarget = "cursor"): AddProjectResult {
+  addProject(dirPath: string, clickTarget: ClickTarget = "cursor", workspacePath?: string): AddProjectResult {
     const valid = validateProjectDir(dirPath, this._projects);
     if (!valid.ok) {
       return { ok: false, error: valid.error };
@@ -152,6 +155,7 @@ export class ProjectStore {
       path: dirPath,
       clickTarget,
       registeredAt: new Date().toISOString(),
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
     };
     this._projects.push(project);
     this.saveProjects();
@@ -182,6 +186,14 @@ export class ProjectStore {
     p.clickTarget = target;
     this.saveProjects();
     return true;
+  }
+
+  /** 既存タイルを workspace 経由で再登録しても、表示名・保存位置・対象アプリを保持する。 */
+  setWorkspacePath(id: string, workspacePath: string): void {
+    const project = this.getProject(id);
+    if (project === null) return;
+    project.workspacePath = workspacePath;
+    this.saveProjects();
   }
 
   /** 手動ステータスの割り当て（260727_1）。null で解除。選択肢に無い値は拒否する */

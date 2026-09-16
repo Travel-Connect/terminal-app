@@ -21,6 +21,8 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Cursor で開く元の workspace。path は hooks・セッション対応付け用の実フォルダ。 */
+  workspacePath?: string;
   clickTarget: ClickTarget;
   registeredAt: string;
   /**

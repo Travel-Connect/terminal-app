@@ -39,12 +39,12 @@ import {
 import { Logger } from "./logger";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
-import { resolveProjectRoot } from "./project-root";
+import { resolveProjectLocations } from "./project-workspace";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
 import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { blockReasonToWorkText, classifyNotification, countTiles, matchProjectByCwd, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, matchProjectByCwd, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
@@ -526,7 +526,7 @@ function showSessionToast(project: Project | null, title: string, body: string):
       focusOwnWindow();
       return;
     }
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
+    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
     logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     if (!outcome.ok) focusOwnWindow();
   });
@@ -717,7 +717,7 @@ function sweepLiveness(): void {
     const project = projectStore.getProject(projectId);
     if (project === null || !windowApiAvailable()) return null; // 判定不能 → liveness-monitor 側で安全側に扱う
     if (windows === null) windows = listTopLevelWindows();
-    return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
+    return hasWindowFor(project.clickTarget, path.basename(project.path), windows, project.workspacePath);
   };
   // 無更新の判定は subagent 記録も含めた最終活動時刻で行い、登録簿が busy の間は切断しない（260907_1 R4）
   const hits = findDisconnected(rest, {
@@ -775,10 +775,11 @@ function pollWindowPresence(): void {
 }
 
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
-function registerProject(dirPath: string): RegisterResult {
+function registerProject(dirPath: string, workspacePath?: string): RegisterResult {
   // 事前検証は ProjectStore と共通の validateProjectDir に集約
   // （hooks マージより先に弾くことで、無効パスへの .claude/ 作成を防ぐ）
-  const valid = validateProjectDir(dirPath, projectStore.projects);
+  const existing = workspacePath === undefined ? undefined : projectStore.projects.find((p) => normalizePath(p.path) === normalizePath(dirPath));
+  const valid = validateProjectDir(dirPath, projectStore.projects.filter((p) => p !== existing));
   if (!valid.ok) {
     return { ok: false, path: dirPath, error: valid.error };
   }
@@ -792,7 +793,11 @@ function registerProject(dirPath: string): RegisterResult {
   const sl = mergeStatusLine(dirPath, projectStore.config.port);
   if (!sl.ok) logger.warn(`statusLine 設定失敗（登録は続行）: ${dirPath} — ${sl.error}`);
   else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${dirPath}`);
-  const added = projectStore.addProject(dirPath);
+  if (existing !== undefined && workspacePath !== undefined) {
+    projectStore.setWorkspacePath(existing.id, workspacePath);
+    return { ok: true, path: dirPath, projectId: existing.id };
+  }
+  const added = projectStore.addProject(dirPath, "cursor", workspacePath);
   if (!added.ok || added.project === undefined) {
     removeHooks(dirPath, ALL_HOOK_EVENTS); // 追加に失敗したらマージを巻き戻す
     removeStatusLine(dirPath);
@@ -800,6 +805,17 @@ function registerProject(dirPath: string): RegisterResult {
   }
   logger.info(`プロジェクト登録: ${dirPath} (hooks 書込=${merged.changed}, statusLine=${sl.skipped === true ? "skip" : String(sl.changed)})`);
   return { ok: true, path: dirPath, projectId: added.project.id };
+}
+
+/** workspace の収録フォルダを設定の基点とし、保存先フォルダへの誤登録を防ぐ。 */
+function registerProjectPath(droppedPath: string): RegisterResult[] {
+  let locations: ReturnType<typeof resolveProjectLocations>;
+  try {
+    locations = resolveProjectLocations(droppedPath);
+  } catch {
+    return [{ ok: false, path: droppedPath, error: "ワークスペースのローカルフォルダを解決できません。folders と参照先を確認してください" }];
+  }
+  return locations.map((location) => registerProject(location.path, location.workspacePath));
 }
 
 /** 登録解除の本体（設定画面の IPC と右クリックメニューの両方から呼ぶ。260712_2 でハンドラから抽出） */
@@ -964,11 +980,11 @@ function devServerMenuItems(id: string, projectPath: string): Electron.MenuItemC
  * 前面化（focusProject）は既存ウィンドウ限定のため、アプリを閉じた後の復帰はこちらを使う。
  * 起動後のセッション復元は従来どおり「再接続」（イベントが届けば自動でも再表示される）。
  */
-function launchProject(id: string): void {
+async function launchProject(id: string): Promise<void> {
   const project = projectStore.getProject(id);
   if (project === null) return;
   const appName = project.clickTarget === "cursor" ? "Cursor" : "ターミナル";
-  const outcome = launchProjectApp(project.clickTarget, project.path);
+  const outcome = await launchProjectApp(project.clickTarget, project.path, project.workspacePath);
   logger.info(
     `立ち上げ ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`
   );
@@ -1022,7 +1038,7 @@ function cancelAllPendingRestores(): void {
 function saveWindowBounds(id: string, quiet = false): boolean {
   const project = projectStore.getProject(id);
   if (project === null) return false;
-  const r = readProjectWindowPlacement(project.clickTarget, path.basename(project.path));
+  const r = readProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.workspacePath);
   if (!r.ok) {
     logger.info(`ウィンドウ位置の記憶 失敗: ${project.name} — ${r.message}`);
     if (!quiet) setStatus(`${project.name}: ${r.message}`);
@@ -1050,7 +1066,7 @@ function saveWindowBounds(id: string, quiet = false): boolean {
 function restoreWindowBounds(id: string, quiet = false): boolean {
   const project = projectStore.getProject(id);
   if (project === null || project.windowBounds === undefined) return false;
-  const r = applyProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.windowBounds);
+  const r = applyProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.windowBounds, project.workspacePath);
   logger.info(`ウィンドウ位置を復元 ${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
   if (!quiet) setStatus(r.ok ? `${project.name} のウィンドウを記憶した位置へ戻しました` : `${project.name}: ${r.message ?? "復元に失敗しました"}`);
   return r.ok;
@@ -1118,7 +1134,7 @@ function scheduleRestoreAfterLaunch(id: string): void {
     const folder = path.basename(project.path);
     const now = Date.now();
     if (seenAt === null) {
-      if (readProjectWindowPlacement(project.clickTarget, folder).ok) {
+      if (readProjectWindowPlacement(project.clickTarget, folder, project.workspacePath).ok) {
         seenAt = now;
       } else if (now - startedAt > LAUNCH_RESTORE_TIMEOUT_MS) {
         cancelPendingRestore(id);
@@ -1127,7 +1143,7 @@ function scheduleRestoreAfterLaunch(id: string): void {
       return;
     }
     if (now - seenAt < LAUNCH_RESTORE_SETTLE_MS * (applied + 1)) return;
-    const r = applyProjectWindowPlacement(project.clickTarget, folder, project.windowBounds);
+    const r = applyProjectWindowPlacement(project.clickTarget, folder, project.windowBounds, project.workspacePath);
     applied += 1;
     logger.info(`ウィンドウ位置の自動復元（${applied} 回目）${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
     if (!r.ok || applied >= 2) {
@@ -1200,7 +1216,7 @@ function wireIpc(): void {
     // フォルダはそのまま登録し、ファイルのドロップのみ .claude / .git を目印にルートへ読み替える
     // （260729 改定: フォルダの祖先探索は「開発案件/」等の親フォルダ誤登録を招くため廃止）。
     // 解決不能（パス不存在）は元パスのまま registerProject の検証エラーに落とす
-    const results = paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = paths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1225,7 +1241,7 @@ function wireIpc(): void {
       // Cursor（VS Code 系）のツリードラッグは OS ドラッグにパス情報が載らない（OLE プローブで実証済み）
       return [{ ok: false, path: "", error: "ドロップにパス情報がありません（Cursor のツリーからは登録不可）。エクスプローラからドロップするか、＋ボタンで選択してください" }];
     }
-    const results = extracted.paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = extracted.paths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1239,7 +1255,7 @@ function wireIpc(): void {
     });
     if (picked.canceled || picked.filePaths.length === 0) return [];
     logger.info(`フォルダ選択登録: ${picked.filePaths.join(" | ")}`);
-    const results = picked.filePaths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = picked.filePaths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1291,7 +1307,7 @@ function wireIpc(): void {
       },
     ];
     const menu = Menu.buildFromTemplate([
-      { label: launchLabel, click: () => { launchProject(id); } },
+      { label: launchLabel, click: () => { void launchProject(id); } },
       ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
@@ -1381,7 +1397,7 @@ function wireIpc(): void {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
     // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
+    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     return outcome;

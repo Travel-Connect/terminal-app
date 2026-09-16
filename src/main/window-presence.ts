@@ -30,7 +30,7 @@ export type WindowPresence = Record<string, boolean>;
 export function computeWindowPresence(projects: readonly Project[], windows: readonly TopLevelWindow[]): WindowPresence {
   const out: WindowPresence = {};
   for (const p of projects) {
-    out[p.id] = hasWindowFor(p.clickTarget, path.basename(p.path), windows);
+    out[p.id] = hasWindowFor(p.clickTarget, path.basename(p.path), windows, p.workspacePath);
   }
   return out;
 }
