@@ -117,7 +117,7 @@ describe("UTF-8 チャンク境界（bug-audit #1: Buffer 蓄積 → end で一�
     // どちらでも「イベントが状態へ届かない」ことが要件（bug-audit #11 の採用挙動）。
     const outcome = await new Promise<{ status?: number; errored: boolean }>((resolve) => {
       const req = http.request(
-        { host: "127.0.0.1", port, path: "/terminal-app/event", method: "POST" },
+        { host: "127.0.0.1", port, path: "/terminal-app/event", method: "POST", headers: { "Content-Type": "application/json" } },
         (res) => {
           res.resume();
           res.on("end", () => resolve({ status: res.statusCode ?? 0, errored: false }));

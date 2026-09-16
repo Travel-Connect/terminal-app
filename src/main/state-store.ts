@@ -79,6 +79,10 @@ export function validateEvent(payload: unknown): ValidationResult {
 /** タイルに表示する作業テキストの最大文字数（超過分は「…」で省略。260712 課題B） */
 export const WORK_TEXT_MAX = 80;
 
+/** セッション記録の上限（260916_3。evictForNewSession 参照）。分割タイル・サブエージェント込みでも十分な余裕 */
+export const MAX_SESSIONS_PER_PROJECT = 32;
+export const MAX_SESSIONS_TOTAL = 512;
+
 /**
  * prompt → タイル表示用の作業テキスト整形（260712 課題B）。
  * 改行・連続空白を単一スペースへ畳み、WORK_TEXT_MAX 文字で省略する。
@@ -382,6 +386,7 @@ export class StateStore extends EventEmitter {
 
     const t = this.now();
     const existing = this.sessions.get(evt.session_id);
+    if (existing === undefined) this.evictForNewSession(project.id);
     const rec: SessionRec = existing ?? {
       sessionId: evt.session_id,
       projectId: project.id,
@@ -517,6 +522,24 @@ export class StateStore extends EventEmitter {
     }
     if (removed.length > 0) this.emit("changed");
     return removed;
+  }
+
+  /**
+   * セッション記録の上限（260916_3）。session_id は送信側が自由に決められ、上限が無いと偽イベントで Map が
+   * 単調増加し（常駐なので回収されない）、掃引の同期 I/O が線形に重くなる。
+   * 新規セッションを作る前に、同じプロジェクト／全体が上限に達していれば、実行中でない最も古い記録
+   * （無ければ最も古い記録）を捨てる
+   */
+  private evictForNewSession(projectId: string): void {
+    const evictOldest = (candidates: SessionRec[]): void => {
+      if (candidates.length === 0) return;
+      const pool = candidates.filter((r) => r.state !== "running");
+      const target = (pool.length > 0 ? pool : candidates).reduce((a, b) => (b.lastEventAt < a.lastEventAt ? b : a));
+      this.sessions.delete(target.sessionId);
+    };
+    const inProject = [...this.sessions.values()].filter((r) => r.projectId === projectId);
+    if (inProject.length >= MAX_SESSIONS_PER_PROJECT) evictOldest(inProject);
+    if (this.sessions.size >= MAX_SESSIONS_TOTAL) evictOldest([...this.sessions.values()]);
   }
 
   /** 1 セッションの表示を消す（分割タイルの「この枠を消す」。260904_1 #3） */

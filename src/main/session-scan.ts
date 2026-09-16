@@ -179,6 +179,35 @@ export function activityMtimeMs(transcriptPath: string): number | null {
   return latest;
 }
 
+/**
+ * hook payload の transcript_path として受け入れる親ディレクトリ（260916_3）。
+ * 受信サーバに届いた任意のパスをそのまま open していたため、偽イベントでアプリに任意ファイルを読ませられた。
+ * 既定は `~/.claude/projects`。検証用に `TERMINAL_APP_DATA_DIR`（E2E は擬似 transcript をここに置く）と
+ * `TERMINAL_APP_TRANSCRIPT_DIRS`（path.delimiter 区切り）を足せる
+ */
+export function transcriptRoots(env: NodeJS.ProcessEnv = process.env, homeDir: string = os.homedir()): string[] {
+  const roots = [path.join(homeDir, ".claude", "projects")];
+  const dataDir = env.TERMINAL_APP_DATA_DIR;
+  if (dataDir !== undefined && dataDir.trim() !== "") roots.push(dataDir);
+  const extra = env.TERMINAL_APP_TRANSCRIPT_DIRS;
+  if (extra !== undefined && extra.trim() !== "") {
+    for (const d of extra.split(path.delimiter)) if (d.trim() !== "") roots.push(d);
+  }
+  return roots;
+}
+
+/** transcript_path が許可された親ディレクトリ配下の .jsonl か（`..` は path.resolve で潰す。大文字小文字は無視） */
+export function isAllowedTranscriptPath(transcriptPath: string, roots: readonly string[]): boolean {
+  if (typeof transcriptPath !== "string" || transcriptPath.trim() === "") return false;
+  const resolved = path.resolve(transcriptPath);
+  if (!resolved.toLowerCase().endsWith(".jsonl")) return false;
+  const resolvedN = normalizePath(resolved);
+  return roots.some((root) => {
+    const rootN = normalizePath(path.resolve(root));
+    return resolvedN.startsWith(rootN + "\\");
+  });
+}
+
 export function mungeProjectPath(projectPath: string): string {
   return projectPath.replace(/[^a-zA-Z0-9]/g, "-");
 }

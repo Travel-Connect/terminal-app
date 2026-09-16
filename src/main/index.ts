@@ -42,7 +42,7 @@ import { getDataDir } from "./paths";
 import { resolveProjectLocations } from "./project-workspace";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
-import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
+import { activityMtimeMs, blockedStopOf, isAllowedTranscriptPath, scanLiveSessions, transcriptRoots, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { blockReasonToWorkText, classifyNotification, countTiles, isIgnorableNotification, matchProjectByCwd, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
@@ -165,6 +165,8 @@ let eventServer: EventServer | null = null;
 
 /** セッションごとに最後に通知を出した状態（260712_5）。同一状態への再遷移で通知が連発するのを防ぐ */
 const lastNotifiedState = new Map<string, SessionState>();
+/** transcript_path を無視した警告を出したセッション（同じセッションで毎イベント警告しない。260916_3） */
+const warnedTranscriptPaths = new Set<string>();
 
 /* ---------------- 作業継続中の保持（260908_1） ---------------- */
 
@@ -398,6 +400,14 @@ function createAppEventServer(): EventServer {
         const p = matchProjectByCwd(evt.cwd, projectStore.projects);
         logger.info(`event 受信: Notification 種別=other(${evt.notification_type ?? "?"}) → 状態変更なし (project=${p?.id ?? "未登録"}, session=${evt.session_id})`);
         return;
+      }
+      if (evt.transcript_path !== undefined && !isAllowedTranscriptPath(evt.transcript_path, transcriptRoots())) {
+        // 許可ディレクトリ外の transcript_path は使わない（260916_3: 偽イベントによる任意ファイル読み取りの防止）
+        if (!warnedTranscriptPaths.has(evt.session_id)) {
+          warnedTranscriptPaths.add(evt.session_id);
+          logger.warn(`transcript_path が許可ディレクトリ外のため無視: session=${evt.session_id}`);
+        }
+        delete evt.transcript_path;
       }
       cancelPendingStopCheck(evt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
       releasedPendingToast.delete(evt.session_id);
