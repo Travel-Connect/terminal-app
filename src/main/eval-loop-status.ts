@@ -66,8 +66,46 @@ export interface LoopStatus {
 export const ENDED_SHOW_MS = 30 * 60_000;
 /** codex ジョブの進捗ログがこれより古ければ走行中とみなさない（ハートビート 60 秒 × 2 ＋余裕） */
 export const JOB_STALE_MS = 150_000;
-/** `.mso/agents` の走査上限（残骸 state の掃除はプラグイン側の hook に任せる） */
+/**
+ * `.mso/agents` の走査上限（残骸 state の掃除はプラグイン側の hook に任せる）。
+ * 260916_2: readdir の並び（Windows はアルファベット順）で先頭から切っていたため、id が後ろに並ぶ進行中ループが
+ * 見えなくなっていた（webdashboard-app は 252 件）。state.json の mtime が新しい順に並べてから上限を適用する
+ */
 const MAX_AGENT_ENTRIES = 200;
+/** agents ディレクトリの一覧（mtime 順）を短時間キャッシュする（1 掃引で複数セッションが同じ base を見るため） */
+const AGENT_LIST_TTL_MS = 5_000;
+const agentListCache = new Map<string, { at: number; dirMtime: number | null; names: string[] }>();
+
+/**
+ * `.mso/agents` 配下の state.json を mtime 降順で並べた名前一覧（上限 MAX_AGENT_ENTRIES）。読めなければ空。
+ * キャッシュはディレクトリ自体の mtime（エントリの増減で変わる）が同じ間だけ有効
+ */
+export function listAgentDirsByMtime(agentsDir: string, now: number = Date.now()): string[] {
+  const key = agentsDir.toLowerCase();
+  const dirMtime = mtimeMs(agentsDir);
+  const cached = agentListCache.get(key);
+  if (cached !== undefined && cached.dirMtime === dirMtime && now - cached.at < AGENT_LIST_TTL_MS && now >= cached.at) return cached.names;
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(agentsDir);
+  } catch {
+    names = [];
+  }
+  const withMtime: Array<{ name: string; m: number }> = [];
+  for (const name of names) {
+    const m = mtimeMs(path.join(agentsDir, name, "state.json"));
+    if (m !== null) withMtime.push({ name, m });
+  }
+  withMtime.sort((a, b) => b.m - a.m || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const result = withMtime.slice(0, MAX_AGENT_ENTRIES).map((e) => e.name);
+  agentListCache.set(key, { at: now, dirMtime, names: result });
+  return result;
+}
+
+/** テスト用: agents 一覧のキャッシュを捨てる */
+export function resetAgentListCache(): void {
+  agentListCache.clear();
+}
 const JOB_ROLES: ReadonlyArray<RunningJob["role"]> = ["plan", "generator"];
 /** 進捗ログ末尾の走査量（PHASE_END 行の有無を見るには末尾だけで足りる） */
 const PROGRESS_TAIL_BYTES = 4096;
@@ -283,13 +321,7 @@ export function findLoopsForSession(s: LoopLookupSession): LoopState[] {
     const st = readStateFile(serial);
     if (st !== null) add(serial, st);
     const agentsDir = path.join(mso, "agents");
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(agentsDir);
-    } catch {
-      names = [];
-    }
-    for (const name of names.slice(0, MAX_AGENT_ENTRIES)) {
+    for (const name of listAgentDirsByMtime(agentsDir)) {
       const p = path.join(agentsDir, name, "state.json");
       const a = readStateFile(p);
       if (a !== null && a.sessionId === s.sessionId) add(p, a);

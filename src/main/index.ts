@@ -44,7 +44,7 @@ import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
 import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { blockReasonToWorkText, classifyNotification, countTiles, matchProjectByCwd, normalizePath, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, isIgnorableNotification, matchProjectByCwd, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
@@ -277,6 +277,11 @@ function projectNameOfSession(sessionId: string): string {
 function showReleasedToast(sessionId: string, project: Project | null): void {
   releasedPendingToast.delete(sessionId);
   if (project === null) return;
+  if (!isDisplayedSession(project.id, sessionId)) {
+    logger.info(`完了トーストを省略（タイルに表示されていないセッション）: ${project.name} (session=${sessionId})`);
+    lastNotifiedState.set(sessionId, "done");
+    return;
+  }
   const loopText = loopStatusCache.get(sessionId)?.text;
   const body = loopText !== undefined && loopText.startsWith("ループ終了") ? `${loopText}。応答が完了しました。` : "応答が完了しました。";
   showSessionToast(project, `${project.name}: セッションが完了しました`, body);
@@ -370,6 +375,11 @@ function scheduleStopRecheck(sessionId: string, notify: boolean, project: Projec
       return;
     }
     if (notify && project !== null) {
+      if (!isDisplayedSession(project.id, sessionId)) {
+        // 表示外のセッション（同じプロジェクトで実行中の本体がある間に終わった子セッション等）の完了は通知しない（260916_2）
+        logger.info(`完了トーストを省略（タイルに表示されていないセッション）: ${project.name} (session=${sessionId})`);
+        return;
+      }
       showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
     }
   }, STOP_RECHECK_DELAY_MS);
@@ -382,6 +392,13 @@ function createAppEventServer(): EventServer {
     // 実稼働インスタンス（既定 41321）と並走しても EADDRINUSE を起こさない（260712 課題C）
     port: demoMode ? 0 : projectStore.config.port,
     onEvent: (evt, receivedAt) => {
+      deadStrikes.delete(evt.session_id); // イベントが届く = プロセスは生きている（260916_2: 登録簿の「無い」観測をやり直す）
+      if (isIgnorableNotification(evt)) {
+        // 人の応答を要しない通知（auth_success / agent_completed 等。260916_2）: 状態も前倒し判定も触らない
+        const p = matchProjectByCwd(evt.cwd, projectStore.projects);
+        logger.info(`event 受信: Notification 種別=other(${evt.notification_type ?? "?"}) → 状態変更なし (project=${p?.id ?? "未登録"}, session=${evt.session_id})`);
+        return;
+      }
       cancelPendingStopCheck(evt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
       releasedPendingToast.delete(evt.session_id);
       // 作業継続中の保持（260908_1）: Stop と許可要求以外の Notification は、ループ進行中・バックグラウンド作業の
@@ -582,6 +599,22 @@ function updateLoopTexts(): boolean {
 const DEAD_STRIKES_REQUIRED = 2;
 /** sessionId → 連続で終了と観測した回数 */
 const deadStrikes = new Map<string, number>();
+/**
+ * 登録簿で一度でも「生存」と観測したセッション（260916_2）。
+ * 登録簿に一度も載らないセッション（eval-loop の子 `claude -p` 等。2026-09-16 実測: 1 日 10 本が UserPromptSubmit → Stop の
+ * 2 イベントだけで、登録簿に無いため 20 秒で「切断」→ 破棄 → Stop で復活 → 完了トースト、を繰り返した）は、
+ * 実行中の間は登録簿の「無い」を終了の根拠にしない（終了検知・切断検知は transcript 側の判定に任せる）。
+ * 実行中でなくなれば従来どおり終了済みにして、同じプロジェクトに生存があれば記録を破棄する
+ */
+const seenAliveInRegistry = new Set<string>();
+
+/** そのセッションが今タイルに出ているか（1 タイル表示の代表、または分割タイルの 1 本）。表示外の完了は通知しない（260916_2） */
+function isDisplayedSession(projectId: string, sessionId: string): boolean {
+  const view = stateStore.displaySessions(projectStore.projects)[projectId];
+  if (view !== undefined && view.sessionId === sessionId) return true;
+  const split = stateStore.splitSessions(projectStore.projects)[projectId];
+  return split !== undefined && split.some((v) => v.sessionId === sessionId);
+}
 
 /**
  * 1 掃引（15 秒ごと）:
@@ -605,12 +638,16 @@ function sweepLiveness(): void {
   refreshLoopStatus();
   const held = (sid: string): string | undefined => heldReasonFor(sid, registry);
   if (registry !== null) {
+    const runningIds = new Set(stateStore.runningSessions().map((t) => t.sessionId));
     for (const sid of stateStore.sessionIds()) {
       if (classifyLiveness(registry, sid) === "alive") {
+        seenAliveInRegistry.add(sid);
         deadStrikes.delete(sid);
         if (stateStore.setDead(sid, false)) changed = true;
         continue;
       }
+      // 登録簿に一度も載らないセッションは、実行中の間は登録簿を終了の根拠にしない（260916_2）
+      if (!seenAliveInRegistry.has(sid) && runningIds.has(sid)) continue;
       const strikes = (deadStrikes.get(sid) ?? 0) + 1;
       deadStrikes.set(sid, strikes);
       if (strikes < DEAD_STRIKES_REQUIRED) continue;
@@ -626,6 +663,7 @@ function sweepLiveness(): void {
     const pruned = stateStore.pruneDeadSessions();
     for (const sid of pruned) {
       deadStrikes.delete(sid);
+      seenAliveInRegistry.delete(sid);
       lastNotifiedState.delete(sid);
     }
     if (pruned.length > 0) {
@@ -1008,6 +1046,7 @@ function removeSessionDisplay(id: string, sessionId: string): void {
   if (project === null) return;
   if (!stateStore.removeSession(sessionId)) return;
   deadStrikes.delete(sessionId);
+  seenAliveInRegistry.delete(sessionId);
   lastNotifiedState.delete(sessionId);
   logger.info(`枠を消去: ${project.name} (session=${sessionId})`);
   setStatus(`${project.name} の枠を 1 つ消しました`);

@@ -168,22 +168,37 @@ try {
     counts: "2実行中 / 2セッション",
   });
 
-  // (b) 架空セッションは 2 回の掃引で終了確定 → 切断 → 破棄 → 分割が解ける
+  // (b) 登録簿に一度も載らないセッションは、実行中の間は登録簿を根拠に終了させない（260916_2: eval-loop の子 `claude -p` 等）
+  await sleep(SWEEP_MS * 3 + 500);
+  await shot("02-never-registered-still-running.png");
+  check("(b-1) 架空（未登録簿）セッションは実行中の間は殺されず、分割 2 本のまま", await view(), {
+    tiles: ["①state-running", "②state-running"],
+    split: [`${ALIVE}:running`, `${DEAD}:running`],
+    display: `${DEAD}:running`,
+    counts: "2実行中 / 2セッション",
+  });
+  const log0 = logFile();
+  check("(b-1) ログ: 実行中の未登録簿セッションに終了確認・切断が出ていない", {
+    dead: log0.includes(`セッション終了を確認（登録簿にプロセスなし）: session=${DEAD}`),
+    disconnected: log0.includes(`実行中のまま終了 → 切断表示: session=${DEAD}`),
+  }, { dead: false, disconnected: false });
+  // 実行中でなくなれば（Stop）従来どおり 2 回の掃引で終了確定 → 同じプロジェクトに生存があるので破棄 → 分割が解ける
+  check("注入 Stop（架空）", await inject({ hook_event_name: "Stop", session_id: DEAD }), 204);
   await sleep(SWEEP_MS * 3 + 500);
   await shot("02-dead-pruned.png");
-  check("(b) 架空セッションが破棄され 1 タイルに戻る（生存セッションは実行中のまま）", await view(), {
+  check("(b-2) Stop 後の架空セッションは破棄され 1 タイルに戻る（生存セッションは実行中のまま）", await view(), {
     tiles: ["state-running"],
     split: [],
     display: `${ALIVE}:running`,
     counts: "1実行中 / 1セッション",
   });
   const log1 = logFile();
-  check("(b) ログ: 終了確認 → 切断 → 破棄 の 3 行", {
+  check("(b-2) ログ: 終了確認 → 破棄（切断表示は出ない）", {
     dead: log1.includes(`セッション終了を確認（登録簿にプロセスなし）: session=${DEAD}`),
     disconnected: log1.includes(`実行中のまま終了 → 切断表示: session=${DEAD}`),
     pruned: log1.includes(`終了済みセッションの記録を破棄（同じプロジェクトに生存あり）: ${DEAD}`),
-    aliveUntouched: !log1.includes(`session=${ALIVE}`) || !log1.includes(`セッション終了を確認（登録簿にプロセスなし）: session=${ALIVE}`),
-  }, { dead: true, disconnected: true, pruned: true, aliveUntouched: true });
+    aliveUntouched: !log1.includes(`セッション終了を確認（登録簿にプロセスなし）: session=${ALIVE}`),
+  }, { dead: true, disconnected: false, pruned: true, aliveUntouched: true });
 
   // (c) 確認待ち → transcript 更新 → 実行中へ復帰
   check("注入 Notification（権限確認）", await inject({ hook_event_name: "Notification", session_id: ALIVE, message: "Claude needs your permission to use Bash" }), 204);

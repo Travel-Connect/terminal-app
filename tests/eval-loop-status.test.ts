@@ -13,9 +13,11 @@ import {
   JOB_STALE_MS,
   describeLoop,
   findLoopsForSession,
+  listAgentDirsByMtime,
   loopStatusForSessions,
   parseLoopState,
   readRunningJob,
+  resetAgentListCache,
   summarizeLoops,
   type LoopState,
 } from "../src/main/eval-loop-status";
@@ -134,6 +136,7 @@ describe("readRunningJob / findLoopsForSession / loopStatusForSessions（ファ�
   let dir: string;
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "ta-evalloop-"));
+    resetAgentListCache();
   });
   afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -200,6 +203,22 @@ describe("readRunningJob / findLoopsForSession / loopStatusForSessions（ファ�
     expect(loopStatusForSessions([{ sessionId: "s1", cwd: sub, projectPath: dir }], NOW).get("s1")?.text).toBe("ループ 1/4・計画中");
     writeState(sub, "sessions", "s3", { ...REAL_STATE, session_id: "s3", phase: "eval" });
     expect(loopStatusForSessions([{ sessionId: "s3", cwd: sub, projectPath: dir }], NOW).get("s3")?.text).toBe("ループ 1/4・判定中");
+  });
+
+  it("agents が上限（200）を超えても、state.json の mtime が新しいものから読む: 名前順で末尾の進行中ループを見失わない（260916_2）", () => {
+    // 2026-09-16 実測: webdashboard-app の .mso/agents は 252 件。旧実装は readdir（名前順）の先頭 200 件しか読まず、
+    // id が後ろに並ぶ active なループが保持・バッジの対象外になっていた
+    for (let i = 0; i < 205; i += 1) {
+      const id = `a${String(i).padStart(4, "0")}`;
+      writeState(dir, "agents", id, { ...REAL_STATE, session_id: "other", agent_id: id, active: false, ended_reason: "cancelled" }, 3_600_000 + i * 1_000);
+    }
+    writeState(dir, "agents", "zzzz-newest", { ...REAL_STATE, session_id: "s1", agent_id: "zzzz-newest", iteration: 1, phase: "generator" }, 10_000);
+    resetAgentListCache();
+    const names = listAgentDirsByMtime(path.join(dir, ".mso", "agents"), NOW);
+    expect(names).toHaveLength(200);
+    expect(names[0]).toBe("zzzz-newest");
+    expect(names).not.toContain("a0204"); // 最も古い 6 件が切られる
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).get("s1")).toMatchObject({ active: true, text: "ループ 2/4・実装中" });
   });
 
   it("fork ループ（.mso/agents/<agentId>。state の session_id で対応付け）も拾う", () => {

@@ -145,6 +145,21 @@ export function classifyNotification(message: string | undefined, notificationTy
 }
 
 /**
+ * 状態を変えない Notification か（260916_2）。公式の `notification_type` が付いていて、それが permission でも
+ * idle でもない（auth_success / agent_completed / quota_auto_resume_* 等）通知は、人の応答を要しないので
+ * 「確認待ち」にしない（2026-09-14 実測: auth_success で 5.5 分「確認待ち」のまま＋トースト）。
+ * notification_type が無い旧版・擬似注入は従来どおり文言推定（other も安全側で確認待ち）。
+ */
+export function isIgnorableNotification(evt: HookEvent): boolean {
+  return (
+    evt.hook_event_name === "Notification" &&
+    evt.notification_type !== undefined &&
+    evt.notification_type !== "" &&
+    classifyNotification(evt.message, evt.notification_type) === "other"
+  );
+}
+
+/**
  * イベント → 遷移先状態（design.md 4.3 / 4.8）。
  * - Stop → 完了（無条件）
  * - Notification → 確認待ち（message 種別によらず安全側に倒す）
@@ -292,6 +307,8 @@ export interface ApplyResult {
   discardedRunning?: boolean;
   /** SessionStart で消した同一プロジェクトの終了済み・切断セッション（260909_1。state は "waiting"） */
   prunedSessions?: string[];
+  /** 状態を変えない Notification（notification_type が other。260916_2）を受け流したとき true。state は現状の値 */
+  ignored?: boolean;
 }
 
 /**
@@ -317,15 +334,27 @@ export class StateStore extends EventEmitter {
       // 新しいセッションの開始（260909_1）: 表示は作らない（最初のプロンプトで実行中になる）。
       // 同じプロジェクトの「終了済み」「切断」の記録は、もう見る意味が無いので消してタイルを待機へ戻す
       // （2026-09-09 実測: Claude Code を再起動した後、前のセッションの「切断・8 分前」が最初のプロンプトまで残った）。
-      // 生存中の他セッション（実行中・完了・確認待ち）には触れない
+      // 生存中の他セッション（実行中・完了・確認待ち）には触れない。
+      // auto-compact（source=compact）は同じセッションのターン途中で発火する（2026-09-10 / 09-14 実測）ので何もしない
+      // （260916_2: 消すと実行中の記録・保持根拠・作業テキストが失われ、次の Stop で誤って完了トーストが出ていた）。
+      // 同じ session_id の古い記録（resume）は、実行中でなければ消す
       const pruned: string[] = [];
-      for (const rec of this.sessions.values()) {
-        if (rec.projectId !== project.id) continue;
-        if (rec.dead === true || rec.state === "disconnected" || rec.sessionId === evt.session_id) pruned.push(rec.sessionId);
+      if (evt.source !== "compact") {
+        for (const rec of this.sessions.values()) {
+          if (rec.projectId !== project.id) continue;
+          if (rec.dead === true || rec.state === "disconnected") pruned.push(rec.sessionId);
+          else if (rec.sessionId === evt.session_id && rec.state !== "running") pruned.push(rec.sessionId);
+        }
       }
       for (const sid of pruned) this.sessions.delete(sid);
       if (pruned.length > 0) this.emit("changed");
       return { projectId: project.id, sessionId: evt.session_id, state: "waiting", prunedSessions: pruned };
+    }
+
+    if (isIgnorableNotification(evt)) {
+      // 人の応答を要しない通知（260916_2）: 状態・時刻・作業テキストのいずれも変えない
+      const existing = this.sessions.get(evt.session_id);
+      return { projectId: project.id, sessionId: evt.session_id, state: existing?.state ?? "waiting", ignored: true };
     }
 
     let mapped = mapEventToState(evt);

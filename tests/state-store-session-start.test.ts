@@ -53,6 +53,28 @@ describe("applyEvent(SessionStart)", () => {
     expect(store.sessionIds()).toEqual([]);
   });
 
+  it("source=compact は何もしない: 実行中の同一セッションも他の終了済みも消さない（260916_2）", () => {
+    // 2026-09-10 / 09-14 実測: auto-compact はターン途中で同じ session_id の SessionStart を発火し、
+    // 旧実装は実行中の記録（作業テキスト・保持根拠）を消して、次の Stop で誤って完了トーストを出していた
+    const store = new StateStore(() => 1_000_000);
+    store.applyEvent(evt("UserPromptSubmit", "run", { prompt: "品質ループの司令塔" }), projects);
+    store.applyEvent(evt("Stop", "old"), projects);
+    store.setDead("old", true);
+    const r = store.applyEvent(evt("SessionStart", "run", { source: "compact" }), projects);
+    expect(r).toEqual({ projectId: "p1", sessionId: "run", state: "waiting", prunedSessions: [] });
+    expect(store.sessionIds().sort()).toEqual(["old", "run"]);
+    expect(store.displaySessions(projects).p1).toMatchObject({ sessionId: "run", state: "running", workText: "品質ループの司令塔" });
+  });
+
+  it("同じ session_id が実行中なら startup / resume でも消さない（他の終了済み・切断は消す）", () => {
+    const store = new StateStore(() => 1_000_000);
+    store.applyEvent(evt("UserPromptSubmit", "run", { prompt: "a" }), projects);
+    store.applyEvent(evt("Stop", "old"), projects);
+    store.setDead("old", true);
+    expect(store.applyEvent(evt("SessionStart", "run", { source: "resume" }), projects)?.prunedSessions).toEqual(["old"]);
+    expect(store.displaySessions(projects).p1).toMatchObject({ sessionId: "run", state: "running" });
+  });
+
   it("未登録 cwd は従来どおり破棄（null）", () => {
     const store = new StateStore(() => 1_000_000);
     expect(store.applyEvent(evt("SessionStart", "s1", { cwd: "C:\\elsewhere" }), projects)).toBe(null);
