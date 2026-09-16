@@ -37,22 +37,28 @@ start-app.bat
 
 - 前提は Node.js 22+ と `curl.exe`（Windows 10+ 同梱）だけ。設定・登録情報は `%APPDATA%\terminal-app\` に PC ごとに作られる
   （リポジトリには含まれない）。
-- 起動後にプロジェクトのフォルダをウィンドウへドラッグ&ドロップすると、そのフォルダの `.claude/settings.json` に hooks が
-  自動追記されて監視が始まる（既存設定は保全・バックアップ付き）。
-- 品質ループ（eval-loop）の進捗バッジは `%USERPROFILE%\.claude\eval-loop\` がある PC でだけ出る。無ければ単に非表示になる。
+- 起動後にプロジェクトのフォルダをウィンドウへドラッグ&ドロップすると、そのフォルダの `.claude/settings.local.json` に hooks が
+  自動追記されて監視が始まる（既存設定は保全・バックアップ付き。260916_4 で共有の `settings.json` から git 管理外の
+  `settings.local.json` へ変更。旧書き込み分は起動時に自動で移す）。
+- 品質ループ（eval-loop）の進捗バッジは、セッションの cwd に `.mso/` がある PC でだけ出る。無ければ単に非表示になる。
 - 2 回目以降の起動は `start-app.bat` だけでよい（ビルド済みなら再ビルドしない）。
 
 - フォルダをウィンドウへドラッグ&ドロップするとプロジェクトが登録され、
-  対象の `.claude/settings.json` に **Stop / Notification / UserPromptSubmit の 3 イベント**の
-  hooks が自動追記される（既存設定は保全・バックアップ `settings.json.terminal-app.bak` 作成・冪等。
+  対象の `.claude/settings.local.json` に **Stop / Notification / UserPromptSubmit / TaskCreated / SessionStart の 5 イベント**の
+  hooks と statusLine 転送が自動追記される（既存設定は保全・バックアップ `settings.local.json.terminal-app.bak` 作成・冪等。
   UserPromptSubmit はプロンプト送信＝実行開始の検知用 — タイルが「実行中」（スピナー＋経過時間）になる）。
+  ドライブ直下（`C:\`）とホームフォルダは登録できない（配下の全プロジェクトに hooks が効くわけではないため）。
+- **書き込み先は `settings.local.json`（260916_4）**: 共有の `settings.json` は git 管理対象で、そこに hooks を書くと clone した
+  他環境で各 hook が最大 2 秒待ち、statusLine が空欄になる。`settings.local.json` は Claude Code が git 除外する project-local
+  設定。共有側にユーザー自身の statusLine があるときは転送設定を書かない（local が優先されて上書きになるため）。
 - **起動時追補**: アプリ起動時に登録済み全プロジェクトの hooks を冪等に再マージし、不足イベントのみ
-  追記する。旧 2 イベント構成で登録済みのプロジェクトにも**再登録なしで** UserPromptSubmit が行き渡る。
+  追記する。旧構成で登録済みのプロジェクトにも**再登録なしで**行き渡る。260916_4 以前に共有 `settings.json` へ書いた
+  hooks / statusLine は、`settings.local.json` へ追記した後で共有側から取り除く（自アプリ分のみ。ユーザーの hook は残す）。
 - 自アプリ分の hooks は command 内の URL パス `/terminal-app/event` で識別する（`terminal-app` を
   パスに含むだけのユーザー自身の hook は除去・置換の対象にならない）。
 - タイルをクリックすると、そのプロジェクトに設定した対象（Cursor / ターミナル）を前面化する。
 - Cursor の `.code-workspace` ファイルもエクスプローラからドロップして登録できる。
-  JSONC の `folders.path` / ローカル `folders.uri` を各プロジェクトとして登録し、hooks は各フォルダの `.claude/settings.json` に書く。
+  JSONC の `folders.path` / ローカル `folders.uri` を各プロジェクトとして登録し、hooks は各フォルダの `.claude/settings.local.json` に書く。
   ワークスペース名によるウィンドウ検出と、元のワークスペースを開く起動に対応する。
   既存タイルは同じワークスペースをドロップすると関連付けが更新される。リモート URI は登録対象外。
   「立ち上げる」はプロジェクトの作業ディレクトリを指定し、Cursor を新しいウィンドウで開く。

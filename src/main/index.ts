@@ -24,7 +24,7 @@ import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
 import { loopStatusForSessions, type LoopStatus } from "./eval-loop-status";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
-import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
+import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, migrateLegacyHooks, removeHooks, removeStatusLine, SETTINGS_FILE } from "./hooks-manager";
 import {
   DISCONNECT_CHECK_INTERVAL_MS,
   STOPPED_RESUME_MIN_AGE_MS,
@@ -841,6 +841,10 @@ function registerProject(dirPath: string, workspacePath?: string): RegisterResul
   const sl = mergeStatusLine(dirPath, projectStore.config.port);
   if (!sl.ok) logger.warn(`statusLine 設定失敗（登録は続行）: ${dirPath} — ${sl.error}`);
   else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${dirPath}`);
+  // 260916_4 以前に共有 settings.json へ書いた分があれば settings.local.json へ移した後で取り除く
+  const mig = migrateLegacyHooks(dirPath, ALL_HOOK_EVENTS);
+  if (!mig.ok) logger.warn(`settings.json からの移行に失敗（登録は続行）: ${dirPath} — ${mig.error}`);
+  else if (mig.changed) logger.info(`hooks / statusLine を settings.json から settings.local.json へ移行: ${dirPath}`);
   if (existing !== undefined && workspacePath !== undefined) {
     projectStore.setWorkspacePath(existing.id, workspacePath);
     return { ok: true, path: dirPath, projectId: existing.id };
@@ -877,18 +881,25 @@ async function unregisterProjectById(id: string): Promise<OpResult> {
       `dev-server 停止（登録解除に伴う）${stopped.ok ? "成功" : "失敗"}: ${project.name}${stopped.error !== undefined ? ` — ${stopped.error}` : ""}`
     );
   }
+  // settings.local.json（現行）と共有 settings.json（260916_4 以前の書き込み先）の両方から自アプリ分を除く
   const removed = removeHooks(project.path, ALL_HOOK_EVENTS);
-  if (!removed.ok) {
+  const removedLegacy = removed.ok ? removeHooks(project.path, ALL_HOOK_EVENTS, SETTINGS_FILE) : removed;
+  if (!removed.ok || !removedLegacy.ok) {
     // design.md 4.2 除去: パース失敗時は中断（手動対応を促す）。登録は残す
-    logger.error(`hooks 除去失敗: ${project.path} — ${removed.error}`);
-    setStatus(`hooks を除去できません（手動確認が必要）: ${removed.error ?? ""}`);
-    return { ok: false, error: removed.error };
+    const error = removed.error ?? removedLegacy.error;
+    logger.error(`hooks 除去失敗: ${project.path} — ${error}`);
+    setStatus(`hooks を除去できません（手動確認が必要）: ${error ?? ""}`);
+    return { ok: false, error };
   }
   const slRemoved = removeStatusLine(project.path);
   if (!slRemoved.ok) logger.warn(`statusLine 除去失敗（解除は続行）: ${project.path} — ${slRemoved.error}`);
+  const slRemovedLegacy = removeStatusLine(project.path, SETTINGS_FILE);
+  if (!slRemovedLegacy.ok) logger.warn(`statusLine 除去失敗（settings.json。解除は続行）: ${project.path} — ${slRemovedLegacy.error}`);
   projectStore.removeProject(id);
   stateStore.removeProjectSessions(id); // 解除済みプロジェクトのセッションを保持し続けない（メモリ整理）
-  logger.info(`プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed}, statusLine 除去=${slRemoved.changed})`);
+  logger.info(
+    `プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed || removedLegacy.changed}, statusLine 除去=${slRemoved.changed || slRemovedLegacy.changed})`
+  );
   broadcast();
   return { ok: true };
 }
@@ -1557,6 +1568,10 @@ void app.whenReady().then(async () => {
       if (!sl.ok) logger.warn(`statusLine 追補失敗: ${p.path} — ${sl.error}`);
       else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${p.path}`);
       else if (sl.changed) logger.info(`statusLine 転送を追補: ${p.path}`);
+      // 260916_4: 共有 settings.json に残っている自アプリ分を取り除く（local への追記が済んだ後）。冪等
+      const mig = migrateLegacyHooks(p.path, ALL_HOOK_EVENTS);
+      if (!mig.ok) logger.warn(`settings.json からの移行に失敗: ${p.path} — ${mig.error}`);
+      else if (mig.changed) logger.info(`hooks / statusLine を settings.json から settings.local.json へ移行: ${p.path}`);
     }
   }
 

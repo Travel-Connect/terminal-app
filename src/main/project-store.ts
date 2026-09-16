@@ -4,6 +4,7 @@
  */
 import * as crypto from "crypto";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { AppConfig, ClickTarget, Project, ThemeSetting, WindowBounds } from "../shared/types";
 import { DEFAULT_PORT } from "./constants";
@@ -47,6 +48,13 @@ export function validateProjectDir(
   }
   if (!stat.isDirectory()) {
     return { ok: false, error: `フォルダのみ登録できます: ${dirPath}` };
+  }
+  // ドライブ直下・ホームフォルダは登録しない（260916_4）: `C:\` を登録しても配下の全プロジェクトに hooks が効くわけではなく
+  // （Claude Code は cwd 直下の .claude を読む）、C:\.claude に hooks を書く副作用だけが残る。basename も空になる
+  const resolved = path.resolve(dirPath);
+  const isRoot = normalizePath(path.parse(resolved).root) === normalizePath(resolved);
+  if (isRoot || normalizePath(resolved) === normalizePath(os.homedir())) {
+    return { ok: false, error: `ドライブ直下・ホームフォルダは登録できません（プロジェクトのフォルダを登録してください）: ${dirPath}` };
   }
   const norm = normalizePath(dirPath);
   if (projects.some((p) => normalizePath(p.path) === norm)) {

@@ -109,6 +109,15 @@ Claude Code: Stop/Notification/UserPromptSubmit 発火 → hook コマンド実�
 
 ### 4.1 追記する settings.json 断片
 
+> **改訂（260916_4）**: 書き込み先は `.claude/settings.json`（チーム共有・git 管理対象）から
+> **`.claude/settings.local.json`**（Claude Code の project-local settings。作成時に git 除外される）へ変更した。
+> 共有側に書くと、clone した他環境で各 hook が `-m 2` の上限まで待ち、statusLine が空欄化する（敵対的レビュー H5）。
+> 実運用のイベントは Stop / Notification / UserPromptSubmit / TaskCreated / SessionStart の 5 つ（`ALL_HOOK_EVENTS`）。
+> 260916_4 以前に共有側へ書いた自アプリ分は、起動時追補で local へ追記した後に共有側から取り除く（`migrateLegacyHooks`。
+> ユーザー自身の hook は残す）。登録解除は両ファイルから除去する。共有側にユーザー自身の statusLine があれば
+> local へ転送設定を書かない（local が優先され上書きになるため）。ドライブ直下・ホームフォルダは登録拒否。
+> 以下の記述で `settings.json` とあるのは、現行では `settings.local.json` を指す。
+
 登録時、プロジェクトの `.claude/settings.json` に以下をマージする。対象イベントは
 **Stop / Notification / UserPromptSubmit の 3 つ**（2026-07-11 改訂: OPEN-04 案 A の採用により
 UserPromptSubmit を追加 — 4.5 参照）。
