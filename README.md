@@ -37,20 +37,31 @@ start-app.bat
 
 - 前提は Node.js 22+ と `curl.exe`（Windows 10+ 同梱）だけ。設定・登録情報は `%APPDATA%\terminal-app\` に PC ごとに作られる
   （リポジトリには含まれない）。
-- 起動後にプロジェクトのフォルダをウィンドウへドラッグ&ドロップすると、そのフォルダの `.claude/settings.json` に hooks が
-  自動追記されて監視が始まる（既存設定は保全・バックアップ付き）。
-- 品質ループ（eval-loop）の進捗バッジは `%USERPROFILE%\.claude\eval-loop\` がある PC でだけ出る。無ければ単に非表示になる。
+- 起動後にプロジェクトのフォルダをウィンドウへドラッグ&ドロップすると、そのフォルダの `.claude/settings.local.json` に hooks が
+  自動追記されて監視が始まる（既存設定は保全・バックアップ付き。260916_4 で共有の `settings.json` から git 管理外の
+  `settings.local.json` へ変更。旧書き込み分は起動時に自動で移す）。
+- 品質ループ（eval-loop）の進捗バッジは、セッションの cwd に `.mso/` がある PC でだけ出る。無ければ単に非表示になる。
 - 2 回目以降の起動は `start-app.bat` だけでよい（ビルド済みなら再ビルドしない）。
 
 - フォルダをウィンドウへドラッグ&ドロップするとプロジェクトが登録され、
-  対象の `.claude/settings.json` に **Stop / Notification / UserPromptSubmit の 3 イベント**の
-  hooks が自動追記される（既存設定は保全・バックアップ `settings.json.terminal-app.bak` 作成・冪等。
+  対象の `.claude/settings.local.json` に **Stop / Notification / UserPromptSubmit / TaskCreated / SessionStart の 5 イベント**の
+  hooks と statusLine 転送が自動追記される（既存設定は保全・バックアップ `settings.local.json.terminal-app.bak` 作成・冪等。
   UserPromptSubmit はプロンプト送信＝実行開始の検知用 — タイルが「実行中」（スピナー＋経過時間）になる）。
+  ドライブ直下（`C:\`）とホームフォルダは登録できない（配下の全プロジェクトに hooks が効くわけではないため）。
+- **書き込み先は `settings.local.json`（260916_4）**: 共有の `settings.json` は git 管理対象で、そこに hooks を書くと clone した
+  他環境で各 hook が最大 2 秒待ち、statusLine が空欄になる。`settings.local.json` は Claude Code が git 除外する project-local
+  設定。共有側にユーザー自身の statusLine があるときは転送設定を書かない（local が優先されて上書きになるため）。
 - **起動時追補**: アプリ起動時に登録済み全プロジェクトの hooks を冪等に再マージし、不足イベントのみ
-  追記する。旧 2 イベント構成で登録済みのプロジェクトにも**再登録なしで** UserPromptSubmit が行き渡る。
+  追記する。旧構成で登録済みのプロジェクトにも**再登録なしで**行き渡る。260916_4 以前に共有 `settings.json` へ書いた
+  hooks / statusLine は、`settings.local.json` へ追記した後で共有側から取り除く（自アプリ分のみ。ユーザーの hook は残す）。
 - 自アプリ分の hooks は command 内の URL パス `/terminal-app/event` で識別する（`terminal-app` を
   パスに含むだけのユーザー自身の hook は除去・置換の対象にならない）。
 - タイルをクリックすると、そのプロジェクトに設定した対象（Cursor / ターミナル）を前面化する。
+- Cursor の `.code-workspace` ファイルもエクスプローラからドロップして登録できる。
+  JSONC の `folders.path` / ローカル `folders.uri` を各プロジェクトとして登録し、hooks は各フォルダの `.claude/settings.local.json` に書く。
+  ワークスペース名によるウィンドウ検出と、元のワークスペースを開く起動に対応する。
+  既存タイルは同じワークスペースをドロップすると関連付けが更新される。リモート URI は登録対象外。
+  「立ち上げる」はプロジェクトの作業ディレクトリを指定し、Cursor を新しいウィンドウで開く。
 - **未接続タイル**: クリックで開く対象アプリ（Cursor / ターミナル）でそのフォルダを開いているウィンドウが
   見つからないタイルは灰色で表示される（約 5 秒ごとに判定。実行中・確認待ちのタイルは誤判定で隠さないよう対象外）。
   ステータスバー右端の「未接続を表示」トグルで非表示にでき、設定は再起動後も保持される。
@@ -70,9 +81,29 @@ start-app.bat
 - **ループ進捗バッジ（260907_2）**: 品質ループ（eval-loop）が動いているセッションのタイルには、名前の下に
   「ループ 2/4・codex 実装中 1分・最高 78点」のような青いバッジが出る（周回数は 1 始まり。段階は 計画中／実装中／採点中／判定中、
   codex ジョブが走っていればその役割と経過分。最高点は 2 周目以降）。ループが終わると「ループ終了・合格 92点」
-  （上限到達／停止／時間切れ／停滞で停止／採点不能）を 30 分間だけ表示する。情報源は `%USERPROFILE%\.claude\eval-loop\registry\`
-  （sessions / agents）から辿る state.json と `jobs/iter-NNN-<role>/` の heartbeat。15 秒ごとの掃引で更新。
-  fork ループ（`registry/agents`）も state の session_id で対応付く。env `TERMINAL_APP_EVAL_LOOP_DIR` で参照先を差し替え可能（検証用）。
+  （上限到達／停止／時間切れ／停滞で停止／採点不能）を 30 分間だけ表示する。情報源は eval-loop プラグイン v0.2 が書く
+  `<セッションの cwd>\.mso\sessions\<sessionId>\state.json`（直列）と `.mso\agents\<agentId>\state.json`（fork。state の session_id で対応付け）、
+  codex ジョブは `turns\turn-NNN-<plan|generator>-progress.log`（PHASE_END が無く 150 秒以内に更新）。15 秒ごとの掃引で更新（260908_1 で `.mso` 配置へ追従）。
+- **作業継続中の保持（260908_1）**: 品質ループの司令塔は codex を Monitor で待つ間、通知が来るたびに短く応答して終える。
+  そのたびに Stop hook と入力待ち Notification が届き、タイルが「完了」「確認待ち」に倒れてトーストが鳴っていた。
+  次の 2 つの根拠があるあいだは Stop・入力待ち通知を受けても「実行中」を保ち、終了検知・切断検知の対象からも外す:
+  (1) そのセッションの品質ループが進行中（`.mso` の state.json が active。codex 進捗ログが動いていれば無条件、
+  止まっていれば state / 進捗ログ / transcript のどれかが 30 分以内に動いたこと）、
+  (2) 直近のプロンプトがバックグラウンドタスクの通知（`<task-notification>` による自動起床）で、Claude Code の登録簿 status が
+  idle / waiting 以外（例: バックグラウンドの shell が残っている `shell`）。通知による起床では作業テキストを上書きしない。
+  許可要求の Notification はループ中でも「確認待ち」（人の応答が要る）。保持が解けて完了になったとき（ループ終了・バックグラウンド作業終了）に
+  初めて完了トーストを出し、ループが終わっていれば本文に「ループ終了・合格 92点」を添える。
+- **残骸 state の無視と通知種別の公式化（260908_2）**: eval-loop プラグインはサブエージェント起動時に `.mso/agents/<id>/state.json` を
+  active=true で事前作成し、ループを使わなかったサブエージェントの分は閉じられずに残ることがある（task が空のまま）。
+  この残骸を「ループ進行中」と読んでタイルが回り続けたため、task 未設定の state は存在しないものとして扱う（バッジ・保持ともに対象外。
+  プラグインの loop-control.sh と同じ規則）。Notification の種別は公式の `notification_type`
+  （permission_prompt / idle_prompt / elicitation_* / agent_needs_input 等）で判定し、無いときだけ文言で推定する。
+- **入力待ちの誤「切断」防止と SessionStart（260909_1）**: 入力待ちのまま `/effort` `/model` などのローカルコマンドを打つと transcript が動き、
+  それをターン開始と誤読して「実行中」へ戻り、15 分後に「切断」へ倒れていた。ローカルコマンドの痕跡は終端分類で読み飛ばし、
+  確認待ちからの transcript 復帰は本当にターンが始まった（終端 open）ときだけにする。登録簿 status が idle のまま transcript が
+  3 分止まった「実行中」は「完了」へ倒し、idle のセッションは切断判定の対象外にする（生きて入力待ちは切断ではない）。
+  あわせて hooks に **SessionStart** を追記（起動時追補で既存プロジェクトにも行き渡る）: 新しいセッションが始まったら、同じフォルダの
+  「切断」「終了済み」の表示を消してタイルを待機へ戻す（Claude Code 再起動後に前セッションの「切断・N分前」が残らない）。
 - **分割タイル（260904_1 #3）**: 1 つのフォルダで 2 本以上の claude が同時に動いている（Cursor の複数ターミナル等）と、
   タイルが「名前 ①」「名前 ②」（起動順）に自動で分かれ、それぞれの状態・作業テキストが見える。1 本に戻れば元の 1 タイルへ。
   生死は Claude Code 自身が書く登録簿（`%USERPROFILE%\.claude\sessions\<pid>.json`）とプロセス存在で判定するため、

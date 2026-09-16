@@ -31,8 +31,15 @@ export const HOOK_EVENTS = ["Stop", "Notification", "UserPromptSubmit"] as const
  */
 export const TASK_HOOK_EVENTS = ["TaskCreated"] as const;
 
+/**
+ * セッション開始の検知（260909_1）: SessionStart → 同じプロジェクトの「切断」「終了済み」表示を消し、タイルを待機へ戻す。
+ * payload は session_id / cwd / source（startup / resume / clear / compact / fork。公式 hooks reference）。
+ * 起動時追補で既存プロジェクトにも冪等に行き渡る
+ */
+export const SESSION_HOOK_EVENTS = ["SessionStart"] as const;
+
 /** 実運用で追記する全イベント（index.ts の登録・起動時追補・除去はこちらを渡す） */
-export const ALL_HOOK_EVENTS = [...HOOK_EVENTS, ...TASK_HOOK_EVENTS] as const;
+export const ALL_HOOK_EVENTS = [...HOOK_EVENTS, ...TASK_HOOK_EVENTS, ...SESSION_HOOK_EVENTS] as const;
 
 export interface HookOpResult {
   ok: boolean;
@@ -83,12 +90,27 @@ function buildHookEntry(port: number): HookEntry {
   };
 }
 
-export function settingsPathFor(projectPath: string): string {
-  return path.join(projectPath, ".claude", "settings.json");
+/** チーム共有（git 管理対象）の project settings。260916_4 以前は本アプリもここへ書いていた（移行元） */
+export const SETTINGS_FILE = "settings.json";
+/**
+ * 本アプリの書き込み先（260916_4）: `.claude/settings.local.json`。Claude Code の project-local settings で、
+ * 作成時に git 除外される。共有の settings.json に hooks / statusLine を書くと、そのリポジトリを clone した他環境で
+ * 各 hook が最大 2 秒待ち、statusLine が空欄化する（レビュー H5）
+ */
+export const LOCAL_SETTINGS_FILE = "settings.local.json";
+export type SettingsFile = typeof SETTINGS_FILE | typeof LOCAL_SETTINGS_FILE;
+
+export function settingsPathFor(projectPath: string, file: SettingsFile = LOCAL_SETTINGS_FILE): string {
+  return path.join(projectPath, ".claude", file);
 }
 
-export function backupPathFor(projectPath: string): string {
-  return settingsPathFor(projectPath) + ".terminal-app.bak";
+/** 移行元（共有 settings.json）のパス */
+export function legacySettingsPathFor(projectPath: string): string {
+  return settingsPathFor(projectPath, SETTINGS_FILE);
+}
+
+export function backupPathFor(projectPath: string, file: SettingsFile = LOCAL_SETTINGS_FILE): string {
+  return settingsPathFor(projectPath, file) + ".terminal-app.bak";
 }
 
 /**
@@ -125,22 +147,23 @@ interface LoadResult {
 }
 
 function loadSettings(settingsPath: string): LoadResult {
+  const name = path.basename(settingsPath);
   if (!fs.existsSync(settingsPath)) return { ok: true, settings: {}, exists: false };
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, "utf8");
   } catch (e) {
-    return { ok: false, exists: true, error: `settings.json を読み込めません: ${String(e)}` };
+    return { ok: false, exists: true, error: `${name} を読み込めません: ${String(e)}` };
   }
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { ok: false, exists: true, raw, error: "settings.json のルートがオブジェクトではありません" };
+      return { ok: false, exists: true, raw, error: `${name} のルートがオブジェクトではありません` };
     }
     return { ok: true, settings: parsed as SettingsObject, raw, exists: true };
   } catch {
     // design.md 4.2: パース失敗時は何も書かずに中断（壊れたファイルを上書きしない）
-    return { ok: false, exists: true, raw, error: "settings.json の JSON パースに失敗しました（手動確認が必要です）" };
+    return { ok: false, exists: true, raw, error: `${name} の JSON パースに失敗しました（手動確認が必要です）` };
   }
 }
 
@@ -161,9 +184,9 @@ export function writeFileAtomic(filePath: string, content: string): void {
   }
 }
 
-function backupIfExists(projectPath: string, raw: string | undefined): string | undefined {
+function backupIfExists(settingsPath: string, raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined; // 元ファイルが無い場合はバックアップ不要
-  const bak = backupPathFor(projectPath);
+  const bak = settingsPath + ".terminal-app.bak";
   fs.writeFileSync(bak, raw, "utf8");
   return bak;
 }
@@ -172,14 +195,14 @@ function backupIfExists(projectPath: string, raw: string | undefined): string | 
  * バックアップ → アトミック書き込みの共通処理（design.md 4.2 手順 5〜6）。
  * mergeHooks / removeHooks の書き込み末尾を一本化する。
  */
-function backupAndWrite(projectPath: string, settingsPath: string, raw: string | undefined, settings: SettingsObject): HookOpResult {
+function backupAndWrite(settingsPath: string, raw: string | undefined, settings: SettingsObject): HookOpResult {
   let backupPath: string | undefined;
   try {
-    backupPath = backupIfExists(projectPath, raw);
+    backupPath = backupIfExists(settingsPath, raw);
     writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
     return { ok: true, changed: true, backupPath };
   } catch (e) {
-    return { ok: false, changed: false, error: `settings.json の書き込みに失敗しました: ${String(e)}`, backupPath };
+    return { ok: false, changed: false, error: `${path.basename(settingsPath)} の書き込みに失敗しました: ${String(e)}`, backupPath };
   }
 }
 
@@ -193,9 +216,10 @@ export function mergeHooks(
   port: number = DEFAULT_PORT,
   // 既定は従来の 3 イベント（design.md 4.1 の凍結仕様と既存検証に合わせる）。
   // 実運用の呼び出し（index.ts）は ALL_HOOK_EVENTS を渡して TaskCreated も追記する（260712_3）
-  events: readonly string[] = HOOK_EVENTS
+  events: readonly string[] = HOOK_EVENTS,
+  file: SettingsFile = LOCAL_SETTINGS_FILE
 ): HookOpResult {
-  const settingsPath = settingsPathFor(projectPath);
+  const settingsPath = settingsPathFor(projectPath, file);
   const loaded = loadSettings(settingsPath);
   if (!loaded.ok || loaded.settings === undefined) {
     return { ok: false, changed: false, error: loaded.error };
@@ -205,12 +229,12 @@ export function mergeHooks(
 
   // hooks コンテナの検証（想定外の型なら壊さず中断）
   if ("hooks" in settings && (settings.hooks === null || typeof settings.hooks !== "object" || Array.isArray(settings.hooks))) {
-    return { ok: false, changed: false, error: "settings.json の hooks キーがオブジェクトではありません" };
+    return { ok: false, changed: false, error: `${file} の hooks キーがオブジェクトではありません` };
   }
   const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
   for (const evt of events) {
     if (evt in hooks && !Array.isArray(hooks[evt])) {
-      return { ok: false, changed: false, error: `settings.json の hooks.${evt} が配列ではありません` };
+      return { ok: false, changed: false, error: `${file} の hooks.${evt} が配列ではありません` };
     }
   }
 
@@ -241,7 +265,7 @@ export function mergeHooks(
     return { ok: false, changed: false, error: `.claude ディレクトリを作成できません: ${String(e)}` };
   }
   settings.hooks = nextHooks;
-  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+  return backupAndWrite(settingsPath, loaded.raw, settings);
 }
 
 /** settings.json の statusLine が自アプリの転送コマンドか（URL パス一致。260712_3） */
@@ -263,14 +287,23 @@ export interface StatusLineOpResult extends HookOpResult {
  * - 自アプリ分が現在のポートと一致していれば no-op（冪等）
  * - 自アプリ分が旧ポートなら現在のコマンドへ置換（ポート変更の追従）
  */
-export function mergeStatusLine(projectPath: string, port: number = DEFAULT_PORT): StatusLineOpResult {
-  const settingsPath = settingsPathFor(projectPath);
+export function mergeStatusLine(projectPath: string, port: number = DEFAULT_PORT, file: SettingsFile = LOCAL_SETTINGS_FILE): StatusLineOpResult {
+  const settingsPath = settingsPathFor(projectPath, file);
   const loaded = loadSettings(settingsPath);
   if (!loaded.ok || loaded.settings === undefined) {
     return { ok: false, changed: false, error: loaded.error };
   }
   const settings = loaded.settings;
   const command = buildStatusLineCommand(port);
+
+  if (file === LOCAL_SETTINGS_FILE) {
+    // local は共有 settings.json より優先される。共有側にユーザー自身の statusLine があれば、local に書くと上書きしてしまう
+    const shared = loadSettings(legacySettingsPathFor(projectPath));
+    const sharedStatusLine = shared.ok ? shared.settings?.statusLine : undefined;
+    if (sharedStatusLine !== undefined && sharedStatusLine !== null && !statusLineIsOurs(sharedStatusLine)) {
+      return { ok: true, changed: false, skipped: true };
+    }
+  }
 
   if ("statusLine" in settings && settings.statusLine !== undefined && settings.statusLine !== null) {
     if (!statusLineIsOurs(settings.statusLine)) {
@@ -286,12 +319,12 @@ export function mergeStatusLine(projectPath: string, port: number = DEFAULT_PORT
     return { ok: false, changed: false, error: `.claude ディレクトリを作成できません: ${String(e)}` };
   }
   settings.statusLine = { type: "command", command };
-  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+  return backupAndWrite(settingsPath, loaded.raw, settings);
 }
 
 /** statusLine 転送設定の除去（260712_3）。自アプリ分のみ削除し、ユーザー自身の設定は残す */
-export function removeStatusLine(projectPath: string): HookOpResult {
-  const settingsPath = settingsPathFor(projectPath);
+export function removeStatusLine(projectPath: string, file: SettingsFile = LOCAL_SETTINGS_FILE): HookOpResult {
+  const settingsPath = settingsPathFor(projectPath, file);
   if (!fs.existsSync(settingsPath)) return { ok: true, changed: false };
   const loaded = loadSettings(settingsPath);
   if (!loaded.ok || loaded.settings === undefined) {
@@ -300,7 +333,23 @@ export function removeStatusLine(projectPath: string): HookOpResult {
   const settings = loaded.settings;
   if (!statusLineIsOurs(settings.statusLine)) return { ok: true, changed: false };
   delete settings.statusLine;
-  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+  return backupAndWrite(settingsPath, loaded.raw, settings);
+}
+
+/**
+ * 共有 settings.json からの移行（260916_4）: 260916_4 以前に本アプリが書いた hooks（マーカー付き）と statusLine（自アプリ分）を
+ * 共有 settings.json から取り除く。呼び出し側は先に settings.local.json へ mergeHooks / mergeStatusLine を済ませておくこと
+ * （hooks が一瞬も無くならない順序）。共有側に自アプリ分が無ければ何もしない（冪等）。
+ * パース失敗時は何も書かず error を返す（壊れたファイルを上書きしない）
+ */
+export function migrateLegacyHooks(projectPath: string, events: readonly string[] = ALL_HOOK_EVENTS): HookOpResult {
+  const legacy = legacySettingsPathFor(projectPath);
+  if (!fs.existsSync(legacy)) return { ok: true, changed: false };
+  const hooksResult = removeHooks(projectPath, events, SETTINGS_FILE);
+  if (!hooksResult.ok) return hooksResult;
+  const slResult = removeStatusLine(projectPath, SETTINGS_FILE);
+  if (!slResult.ok) return slResult;
+  return { ok: true, changed: hooksResult.changed || slResult.changed, backupPath: slResult.backupPath ?? hooksResult.backupPath };
 }
 
 /**
@@ -310,9 +359,10 @@ export function removeStatusLine(projectPath: string): HookOpResult {
 export function removeHooks(
   projectPath: string,
   // mergeHooks と同じ理由で既定は従来 3 イベント。実運用（index.ts）は ALL_HOOK_EVENTS を渡す
-  events: readonly string[] = HOOK_EVENTS
+  events: readonly string[] = HOOK_EVENTS,
+  file: SettingsFile = LOCAL_SETTINGS_FILE
 ): HookOpResult {
-  const settingsPath = settingsPathFor(projectPath);
+  const settingsPath = settingsPathFor(projectPath, file);
   if (!fs.existsSync(settingsPath)) {
     return { ok: true, changed: false }; // 元々何もない → 除去不要
   }
@@ -346,5 +396,5 @@ export function removeHooks(
     delete settings.hooks; // 空になった hooks キーも削除
   }
 
-  return backupAndWrite(projectPath, settingsPath, loaded.raw, settings);
+  return backupAndWrite(settingsPath, loaded.raw, settings);
 }

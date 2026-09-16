@@ -69,6 +69,27 @@ export function buildListenErrorText(err: unknown, attemptedPort: number): { tit
   return { title, body, status };
 }
 
+/** 受け付ける Host（ポート部は無視）。hooks / statusLine の curl は 127.0.0.1 宛てで送る */
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+/**
+ * 送信元の検証（260916_3 / NFR-04 の補強）。127.0.0.1 バインドだけでは、ブラウザで開いた任意の Web ページの JS が
+ * `fetch("http://127.0.0.1:41321/…", {method:"POST", body})`（text/plain = preflight なし）で到達できる。
+ * - Origin ヘッダがある = ブラウザ発（curl は付けない）→ 403
+ * - Host が loopback 以外（DNS リバインディング）→ 403
+ * - Content-Type が application/json 以外（simple request）→ 415
+ * 戻り値 null = 受理
+ */
+export function rejectReason(headers: http.IncomingHttpHeaders): { status: number; text: string } | null {
+  if (headers.origin !== undefined) return { status: 403, text: "forbidden: browser origin" };
+  const rawHost = (Array.isArray(headers.host) ? headers.host[0] : headers.host) ?? "";
+  const hostName = rawHost.replace(/:\d+$/, "").toLowerCase();
+  if (!ALLOWED_HOSTS.has(hostName)) return { status: 403, text: "forbidden: host" };
+  const ct = (Array.isArray(headers["content-type"]) ? headers["content-type"][0] : headers["content-type"]) ?? "";
+  if (!/^application\/json\s*(;|$)/i.test(ct.trim())) return { status: 415, text: "unsupported media type: application/json required" };
+  return null;
+}
+
 export function createEventServer(opts: EventServerOptions): EventServer {
   const host = opts.host ?? "127.0.0.1";
   const logger = opts.logger ?? nullLogger;
@@ -84,8 +105,9 @@ export function createEventServer(opts: EventServerOptions): EventServer {
     try {
       parsed = JSON.parse(body);
     } catch {
-      // design.md 10 章: 受信 JSON が不正 → 破棄してログ記録（UI は変えない）
-      logger.warn(`event-server: 不正 JSON を破棄: ${body.slice(0, 200)}`);
+      // design.md 10 章: 受信 JSON が不正 → 破棄してログ記録（UI は変えない）。
+      // 本文はログに残さない（prompt に貼られた鍵などが混入しうる。260916_3）
+      logger.warn(`event-server: 不正 JSON を破棄 (${Buffer.byteLength(body, "utf8")} bytes)`);
       respond(res, 400, "invalid json");
       return;
     }
@@ -133,6 +155,14 @@ export function createEventServer(opts: EventServerOptions): EventServer {
       respond(res, 405, "method not allowed", { Allow: "POST" });
       return;
     }
+    const rejected = rejectReason(req.headers);
+    if (rejected !== null) {
+      // ブラウザ経由の偽イベント（CSRF / DNS リバインディング）を弾く（260916_3）。hooks の curl はこの条件をすべて満たす
+      logger.warn(`event-server: 送信元を拒否 (${rejected.status} ${rejected.text})`);
+      respond(res, rejected.status, rejected.text);
+      req.resume(); // 本文は読み捨てる
+      return;
+    }
     // チャンク境界でマルチバイト文字（日本語 message 等）が割れないよう、
     // Buffer のまま蓄積して end で一括デコードする
     const chunks: Buffer[] = [];
@@ -161,6 +191,9 @@ export function createEventServer(opts: EventServerOptions): EventServer {
   }
 
   const server = http.createServer(handleRequest);
+  // 滞留コネクションの上限（260916_3）: hooks の curl は数十 ms で送り切る。ヘッダ 5 秒・全体 10 秒で切る
+  server.headersTimeout = 5_000;
+  server.requestTimeout = 10_000;
 
   let bound: { host: string; port: number } | null = null;
 

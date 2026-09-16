@@ -19,6 +19,8 @@ export interface FocusOutcome {
 export interface TopLevelWindow {
   title: string;
   exe: string;
+  /** 診断用。Electron のクラス名は版により変わるため選別条件には使わない。 */
+  className?: string;
 }
 
 const SW_RESTORE = 9;
@@ -66,6 +68,8 @@ interface Win32Api {
   EnumWindows: any;
   IsWindowVisible: any;
   GetWindowTextW: any;
+  GetWindowTextLengthW: any;
+  GetClassNameW: any;
   GetWindowThreadProcessId: any;
   IsIconic: any;
   ShowWindow: any;
@@ -114,6 +118,8 @@ function loadApi(): Win32Api | null {
       EnumWindows: user32.func("bool __stdcall EnumWindows(EnumWindowsProc *proc, intptr_t lParam)"),
       IsWindowVisible: user32.func("bool __stdcall IsWindowVisible(void *hwnd)"),
       GetWindowTextW: user32.func("int __stdcall GetWindowTextW(void *hwnd, _Out_ uint16_t *str, int nMaxCount)"),
+      GetWindowTextLengthW: user32.func("int __stdcall GetWindowTextLengthW(void *hwnd)"),
+      GetClassNameW: user32.func("int __stdcall GetClassNameW(void *hwnd, _Out_ uint16_t *str, int nMaxCount)"),
       GetWindowThreadProcessId: user32.func(
         "uint32_t __stdcall GetWindowThreadProcessId(void *hwnd, _Out_ uint32_t *pid)"
       ),
@@ -150,7 +156,7 @@ function decodeUtf16(arr: Uint16Array, len: number): string {
 }
 
 function getWindowTitle(api: Win32Api, hwnd: any): string {
-  const buf = new Uint16Array(512);
+  const buf = new Uint16Array(Math.max(512, Math.min(32768, Number(api.GetWindowTextLengthW(hwnd)) + 1)));
   const len = api.GetWindowTextW(hwnd, buf, buf.length) as number;
   return len > 0 ? decodeUtf16(buf, len) : "";
 }
@@ -177,6 +183,7 @@ interface EnumResult {
   hwnd: any;
   title: string;
   exe: string;
+  className: string;
 }
 
 /** 可視トップレベルウィンドウを Z オーダー順（手前から）で列挙する */
@@ -187,7 +194,9 @@ function enumWindows(api: Win32Api): EnumResult[] {
       if (!api.IsWindowVisible(hwnd)) return true;
       const title = getWindowTitle(api, hwnd);
       if (title === "") return true;
-      results.push({ hwnd, title, exe: getProcessExe(api, hwnd) });
+      const classBuf = new Uint16Array(256);
+      const classLen = api.GetClassNameW(hwnd, classBuf, classBuf.length) as number;
+      results.push({ hwnd, title, exe: getProcessExe(api, hwnd), className: decodeUtf16(classBuf, classLen) });
     } catch {
       /* 個別ウィンドウの取得失敗は列挙を止めない */
     }
@@ -205,7 +214,7 @@ function enumWindows(api: Win32Api): EnumResult[] {
 export function listTopLevelWindows(): TopLevelWindow[] {
   const api = loadApi();
   if (api === null) return [];
-  return enumWindows(api).map((w) => ({ title: w.title, exe: w.exe }));
+  return enumWindows(api).map((w) => ({ title: w.title, exe: w.exe, className: w.className }));
 }
 
 /**
@@ -214,10 +223,42 @@ export function listTopLevelWindows(): TopLevelWindow[] {
  * タイトル一致はヒューリスティックのため偽陰性がある（タブ切替でタイトルが変わる等）—
  * 呼び出し側（liveness-monitor）は「消失」を単独の切断根拠にしないこと。
  */
-export function hasWindowFor(target: ClickTarget, folderName: string, windows: readonly TopLevelWindow[]): boolean {
-  const wanted = TARGET_EXES[target];
-  const needle = folderName.toLowerCase();
-  return windows.some((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+export function matchesProjectWindow(target: ClickTarget, folderName: string, window: TopLevelWindow, workspacePath?: string): boolean {
+  if (!TARGET_EXES[target].includes(path.win32.basename(window.exe).toLowerCase())) return false;
+  const names = [folderName];
+  if (target === "cursor" && workspacePath !== undefined) {
+    names.push(path.win32.basename(workspacePath).replace(/\.code-workspace$/i, ""));
+  }
+  const title = window.title.toLowerCase();
+  if (target === "cursor") return matchesCursorTitle(title, names);
+  return names.some((name) => name.trim() !== "" && title.includes(name.toLowerCase()));
+}
+
+/**
+ * Cursor のタイトル一致（260916_5）。既定のタイトルは `[● ]<file> - <folder> - Cursor` / `<folder> - Cursor` /
+ * `<file> - <name> (Workspace) - Cursor`（区切りは " - "。macOS 由来の " — " も同じ扱い）。
+ * 旧実装の部分一致は、登録名「dev」が `dev-server.ts - 他プロジェクト - Cursor` に一致するなど誤前面化の素地だった
+ * （2026-09-16 レビュー H7）ので、末尾「Cursor」の直前のセグメントがフォルダ名（または `<name> (workspace)`）と
+ * 完全一致するときだけ一致とする。フォルダ名に " - " を含む場合も、末尾一致で扱えるようセグメント分割はしない。
+ * 「Cursor Agents」（Agents 表示の固定タイトル）のように末尾が " - cursor" でない窓は判別できないので不一致
+ * （その窓は cursor-state.ts の windowsState で補う）。
+ */
+function matchesCursorTitle(titleLower: string, names: readonly string[]): boolean {
+  const t = titleLower.replace(/ — /g, " - ").replace(/^●\s*/, "");
+  if (!t.endsWith(" - cursor")) return false;
+  const subject = t.slice(0, -" - cursor".length);
+  return names.some((name) => {
+    const n = name.trim().toLowerCase();
+    if (n === "") return false;
+    for (const s of [n, `${n} (workspace)`]) {
+      if (subject === s || subject.endsWith(` - ${s}`)) return true;
+    }
+    return false;
+  });
+}
+
+export function hasWindowFor(target: ClickTarget, folderName: string, windows: readonly TopLevelWindow[], workspacePath?: string): boolean {
+  return windows.some((w) => matchesProjectWindow(target, folderName, w, workspacePath));
 }
 
 function isForeground(api: Win32Api, hwnd: any): boolean {
@@ -234,10 +275,8 @@ function isForeground(api: Win32Api, hwnd: any): boolean {
  * 対象プロジェクトのウィンドウ（hwnd）を探す。
  * EnumWindows は Z 順（手前から）のため、最初の一致 = Z オーダー最前面（design.md 7.1）
  */
-function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: string): any | null {
-  const wanted = TARGET_EXES[target];
-  const needle = folderName.toLowerCase();
-  const found = enumWindows(api).find((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: string, workspacePath?: string): any | null {
+  const found = enumWindows(api).find((w) => matchesProjectWindow(target, folderName, w, workspacePath));
   return found === undefined ? null : found.hwnd;
 }
 
@@ -245,13 +284,13 @@ function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: strin
  * クリック → 前面化（design.md 3.2(c) / 7 章）。
  * folderName = プロジェクトのフォルダ basename（タイトル一致はヒューリスティック。design.md 7.1）
  */
-export function focusProjectWindow(target: ClickTarget, folderName: string): FocusOutcome {
+export function focusProjectWindow(target: ClickTarget, folderName: string, workspacePath?: string): FocusOutcome {
   const api = loadApi();
   if (api === null) {
     return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
   }
   try {
-    const hwnd = findProjectWindow(api, target, folderName);
+    const hwnd = findProjectWindow(api, target, folderName, workspacePath);
     if (hwnd === null) {
       return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
     }
@@ -277,11 +316,11 @@ function emptyPlacement(api: Win32Api): any {
  * GetWindowPlacement の rcNormalPosition（通常時の矩形。最大化・最小化中でも通常時の値が取れる）と
  * 表示状態を返す。最小化中に最大化へ戻る設定（WPF_RESTORETOMAXIMIZED）も「最大化」として扱う。
  */
-export function readProjectWindowPlacement(target: ClickTarget, folderName: string): PlacementResult {
+export function readProjectWindowPlacement(target: ClickTarget, folderName: string, workspacePath?: string): PlacementResult {
   const api = loadApi();
   if (api === null) return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
   try {
-    const hwnd = findProjectWindow(api, target, folderName);
+    const hwnd = findProjectWindow(api, target, folderName, workspacePath);
     if (hwnd === null) return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
     const wp = emptyPlacement(api);
     if (!(api.GetWindowPlacement(hwnd, wp) as boolean)) return { ok: false, message: "ウィンドウ配置を取得できませんでした" };
@@ -306,12 +345,13 @@ export function readProjectWindowPlacement(target: ClickTarget, folderName: stri
 export function applyProjectWindowPlacement(
   target: ClickTarget,
   folderName: string,
-  bounds: { x: number; y: number; width: number; height: number; maximized: boolean }
+  bounds: { x: number; y: number; width: number; height: number; maximized: boolean },
+  workspacePath?: string
 ): FocusOutcome {
   const api = loadApi();
   if (api === null) return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
   try {
-    const hwnd = findProjectWindow(api, target, folderName);
+    const hwnd = findProjectWindow(api, target, folderName, workspacePath);
     if (hwnd === null) return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
     const rect = { left: bounds.x, top: bounds.y, right: bounds.x + bounds.width, bottom: bounds.y + bounds.height };
     if (api.MonitorFromRect(rect, MONITOR_DEFAULTTONULL) === null) {

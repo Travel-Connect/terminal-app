@@ -19,17 +19,19 @@ import * as path from "path";
 import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
+import { findCursorOpenWindow, readCursorOpenWindows } from "./cursor-state";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
-import { evalLoopDir, loopTextForSessions } from "./eval-loop-status";
+import { loopStatusForSessions, type LoopStatus } from "./eval-loop-status";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
-import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
+import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, migrateLegacyHooks, removeHooks, removeStatusLine, SETTINGS_FILE } from "./hooks-manager";
 import {
   DISCONNECT_CHECK_INTERVAL_MS,
   STOPPED_RESUME_MIN_AGE_MS,
   findConcluded,
   findDisconnected,
+  findIdleConcluded,
   findResumedFromConfirm,
   findResumedFromStopped,
   type StoppedResumeDeps,
@@ -38,23 +40,23 @@ import {
 import { Logger } from "./logger";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
-import { resolveProjectRoot } from "./project-root";
+import { resolveProjectLocations } from "./project-workspace";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
-import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
+import { activityMtimeMs, blockedStopOf, isAllowedTranscriptPath, scanLiveSessions, transcriptRoots, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, isIgnorableNotification, matchProjectByCwd, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
   focusProjectWindow,
-  hasWindowFor,
   isAvailable as windowApiAvailable,
   listTopLevelWindows,
   readProjectWindowPlacement,
+  type FocusOutcome,
   type TopLevelWindow,
 } from "./window-control";
-import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
+import { computeWindowPresence, presenceDiff, presenceEquals, projectWindowPresent, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -164,6 +166,130 @@ let eventServer: EventServer | null = null;
 
 /** セッションごとに最後に通知を出した状態（260712_5）。同一状態への再遷移で通知が連発するのを防ぐ */
 const lastNotifiedState = new Map<string, SessionState>();
+/** transcript_path を無視した警告を出したセッション（同じセッションで毎イベント警告しない。260916_3） */
+const warnedTranscriptPaths = new Set<string>();
+
+/* ---------------- 作業継続中の保持（260908_1） ---------------- */
+
+/**
+ * 進行中ループの停滞ガード: ループ側（state.json・codex 進捗ログ）と transcript のどちらも
+ * この時間以上動いていなければ「進行中」の申告を信じない（司令塔が死んだまま active=true が残る残骸対策。30 分）
+ */
+const LOOP_HOLD_STALE_MS = 30 * 60_000;
+
+/**
+ * 直近に読んだループ状況（sessionId → 状況）。掃引で全セッション分を読み直し、Stop / Notification 受信時は
+ * そのセッション分だけ読み直す（state.json の読み取り 1 回＋進捗ログの stat なので受信経路でも安い）
+ */
+const loopStatusCache = new Map<string, LoopStatus>();
+
+/** ループ状況を読み直す（sessions 省略時は保持中の全セッション）。読み取り失敗は警告ログのみで前回値を維持 */
+function refreshLoopStatus(sessions?: ReadonlyArray<{ sessionId: string; cwd?: string; projectPath: string }>): void {
+  const targets = sessions ?? stateStore.loopLookupSessions(projectStore.projects);
+  if (targets.length === 0) return;
+  let statuses: Map<string, LoopStatus>;
+  try {
+    statuses = loopStatusForSessions(targets, Date.now());
+  } catch (e) {
+    logger.warn(`ループ進捗の読み取りに失敗（前回値を維持）: ${String(e)}`);
+    return;
+  }
+  for (const t of targets) {
+    const st = statuses.get(t.sessionId);
+    if (st === undefined) loopStatusCache.delete(t.sessionId);
+    else loopStatusCache.set(t.sessionId, st);
+  }
+}
+
+/** 受信イベントのセッション分だけループ状況を読み直す（まだ StateStore に無いセッションでも cwd から探せる） */
+function refreshLoopStatusForEvent(sessionId: string, cwd: string): void {
+  const project = matchProjectByCwd(cwd, projectStore.projects);
+  if (project === null) return;
+  refreshLoopStatus([{ sessionId, cwd, projectPath: project.path }]);
+}
+
+/**
+ * 品質ループ進行中による保持理由。active=true で codex ジョブが走っていれば無条件、そうでなければ停滞ガード付き。
+ * 戻り値: 保持する理由（undefined = 保持しない）
+ */
+function loopHoldReason(sessionId: string): string | undefined {
+  const st = loopStatusCache.get(sessionId);
+  if (st === undefined || !st.active) return undefined;
+  const label = st.text !== undefined ? `（${st.text}）` : "";
+  if (st.job !== null) return `ループ進行中${label}`;
+  let last = st.lastActivityMs;
+  const transcriptPath = stateStore.transcriptPathOf(sessionId);
+  if (transcriptPath !== undefined) {
+    const m = activityMtimeMs(transcriptPath);
+    if (m !== null && (last === undefined || m > last)) last = m;
+  }
+  if (last !== undefined && Date.now() - last > LOOP_HOLD_STALE_MS) return undefined; // 停滞: 申告を信じない
+  return `ループ進行中${label}`;
+}
+
+/**
+ * バックグラウンド作業の完了待ちによる保持理由（260908_1）: 直近のプロンプトが task-notification（Monitor /
+ * バックグラウンド Bash の通知による起床）で、かつ Claude Code の登録簿 status が idle / waiting でない
+ * （2026-09-08 実測: バックグラウンドの shell と Monitor が残ったまま応答を終えると status="shell" になる）
+ */
+function backgroundHoldReason(sessionId: string, registry: RegistryEntry[] | null): string | undefined {
+  if (!stateStore.isBackgroundDriven(sessionId)) return undefined;
+  const status = registryStatusOf(registry, sessionId);
+  if (status === undefined || status === "idle" || status === "waiting") return undefined;
+  return `バックグラウンド作業の完了待ち（登録簿 status=${status}）`;
+}
+
+/** 作業継続中の保持理由（ループ → バックグラウンドの順。undefined = 保持しない） */
+function heldReasonFor(sessionId: string, registry: RegistryEntry[] | null): string | undefined {
+  return loopHoldReason(sessionId) ?? backgroundHoldReason(sessionId, registry);
+}
+
+/** 現在「保持」でタイルを実行中に保っているセッション（sessionId → 理由。保持開始・解除のログ用） */
+const heldSessions = new Map<string, string>();
+/** 保持が解けたが、まだ完了へ倒れていない（次の掃引で終了検知されたら完了トーストを出す）セッション */
+const releasedPendingToast = new Set<string>();
+
+/** 保持の記録を更新し、保持開始・解除をログに残す */
+function trackHeld(sessionIds: readonly string[], held: (sid: string) => string | undefined): void {
+  for (const sid of sessionIds) {
+    const reason = held(sid);
+    const prev = heldSessions.get(sid);
+    if (reason !== undefined) {
+      if (prev === undefined) {
+        heldSessions.set(sid, reason);
+        releasedPendingToast.delete(sid);
+        logger.info(`作業継続中として保持: ${projectNameOfSession(sid)} (session=${sid}) — ${reason}`);
+      } else if (prev !== reason) {
+        heldSessions.set(sid, reason);
+      }
+    } else if (prev !== undefined) {
+      heldSessions.delete(sid);
+      releasedPendingToast.add(sid);
+      logger.info(`保持を解除: ${projectNameOfSession(sid)} (session=${sid}) — 直前の理由: ${prev}`);
+    }
+  }
+}
+
+function projectNameOfSession(sessionId: string): string {
+  const view = stateStore.displaySessions(projectStore.projects);
+  const pid = Object.keys(view).find((k) => view[k].sessionId === sessionId);
+  return pid !== undefined ? (projectStore.getProject(pid)?.name ?? pid) : sessionId;
+}
+
+/** 保持が解けて完了になったときのトースト（ループが終わっていればその結果を本文にする） */
+function showReleasedToast(sessionId: string, project: Project | null): void {
+  releasedPendingToast.delete(sessionId);
+  if (project === null) return;
+  if (!isDisplayedSession(project.id, sessionId)) {
+    logger.info(`完了トーストを省略（タイルに表示されていないセッション）: ${project.name} (session=${sessionId})`);
+    lastNotifiedState.set(sessionId, "done");
+    return;
+  }
+  const loopText = loopStatusCache.get(sessionId)?.text;
+  const body = loopText !== undefined && loopText.startsWith("ループ終了") ? `${loopText}。応答が完了しました。` : "応答が完了しました。";
+  showSessionToast(project, `${project.name}: セッションが完了しました`, body);
+  lastNotifiedState.set(sessionId, "done");
+}
 
 /**
  * Stop 受信後の前倒し判定（260907_1 R6）: sessionId → タイマー。
@@ -195,6 +321,7 @@ function stoppedResumeDeps(registry: RegistryEntry[] | null): StoppedResumeDeps 
     turnEnd: turnEndOf,
     blockedStop: blockedStopOf,
     activityMtimeMs,
+    heldReason: (sid) => heldReasonFor(sid, registry),
   };
 }
 
@@ -211,7 +338,9 @@ function applyStoppedResume(hit: StoppedResumeHit): boolean {
       ? "登録簿 status=busy（Claude Code は作業中と申告）"
       : hit.reason === "blocked-stop"
         ? `Stop hook が続行を指示${label !== undefined ? ` ${label}` : ""}`
-        : "切断後に transcript（本体または subagent 記録）が更新";
+        : hit.reason === "held"
+          ? (hit.heldReason ?? "作業継続中")
+          : "切断後に transcript（本体または subagent 記録）が更新";
   logger.info(`${from}から実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${sid}) — ${why}`);
   return true;
 }
@@ -220,18 +349,40 @@ function applyStoppedResume(hit: StoppedResumeHit): boolean {
  * Stop 受信の STOP_RECHECK_DELAY_MS 後: まだ作業中（登録簿 busy／block 痕跡）なら完了を取り消して実行中へ戻し、
  * そうでなければここで完了トーストを出す（260907_1 R6）。同じセッションの次のイベントで取り消される
  */
-function scheduleStopRecheck(sessionId: string, notify: boolean, project: Project | null): void {
+function scheduleStopRecheck(sessionId: string, notify: boolean, project: Project | null, cwd: string, held: boolean): void {
   cancelPendingStopCheck(sessionId);
   const timer = setTimeout(() => {
     pendingStopChecks.delete(sessionId);
+    const registry = readSessionRegistry();
+    refreshLoopStatusForEvent(sessionId, cwd);
+    if (held) {
+      // 保持したまま Stop を受けた（260908_1）: ループ終了（Stop hook の中で active=false になる）や
+      // バックグラウンド作業の終了で保持が解けていれば、ここで「完了」にしてトーストを出す。まだ保持中なら掃引に任せる
+      if (heldReasonFor(sessionId, registry) !== undefined) return;
+      const running = stateStore.runningSessions().find((t) => t.sessionId === sessionId);
+      if (running === undefined) return; // その後のイベント・掃引で状態が変わった
+      if (running.transcriptPath !== undefined && turnEndOf(running.transcriptPath) === "open") return; // 続行中（block 等）
+      if (!stateStore.markConcluded(sessionId)) return;
+      heldSessions.delete(sessionId);
+      logger.info(`保持を解除 → 完了: ${project?.name ?? sessionId} (session=${sessionId})`);
+      if (notify) showReleasedToast(sessionId, project);
+      else releasedPendingToast.delete(sessionId);
+      broadcast();
+      return;
+    }
     const target = stateStore.stoppedSessions().find((t) => t.sessionId === sessionId && t.state === "done");
     if (target === undefined) return; // その後のイベント・掃引で状態が変わった
-    const hits = findResumedFromStopped([target], stoppedResumeDeps(readSessionRegistry()));
+    const hits = findResumedFromStopped([target], stoppedResumeDeps(registry));
     if (hits.length > 0 && applyStoppedResume(hits[0])) {
       broadcast();
       return;
     }
     if (notify && project !== null) {
+      if (!isDisplayedSession(project.id, sessionId)) {
+        // 表示外のセッション（同じプロジェクトで実行中の本体がある間に終わった子セッション等）の完了は通知しない（260916_2）
+        logger.info(`完了トーストを省略（タイルに表示されていないセッション）: ${project.name} (session=${sessionId})`);
+        return;
+      }
       showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
     }
   }, STOP_RECHECK_DELAY_MS);
@@ -244,30 +395,77 @@ function createAppEventServer(): EventServer {
     // 実稼働インスタンス（既定 41321）と並走しても EADDRINUSE を起こさない（260712 課題C）
     port: demoMode ? 0 : projectStore.config.port,
     onEvent: (evt, receivedAt) => {
+      deadStrikes.delete(evt.session_id); // イベントが届く = プロセスは生きている（260916_2: 登録簿の「無い」観測をやり直す）
+      if (isIgnorableNotification(evt)) {
+        // 人の応答を要しない通知（auth_success / agent_completed 等。260916_2）: 状態も前倒し判定も触らない
+        const p = matchProjectByCwd(evt.cwd, projectStore.projects);
+        logger.info(`event 受信: Notification 種別=other(${evt.notification_type ?? "?"}) → 状態変更なし (project=${p?.id ?? "未登録"}, session=${evt.session_id})`);
+        return;
+      }
+      if (evt.transcript_path !== undefined && !isAllowedTranscriptPath(evt.transcript_path, transcriptRoots())) {
+        // 許可ディレクトリ外の transcript_path は使わない（260916_3: 偽イベントによる任意ファイル読み取りの防止）
+        if (!warnedTranscriptPaths.has(evt.session_id)) {
+          warnedTranscriptPaths.add(evt.session_id);
+          logger.warn(`transcript_path が許可ディレクトリ外のため無視: session=${evt.session_id}`);
+        }
+        delete evt.transcript_path;
+      }
       cancelPendingStopCheck(evt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
-      const result = stateStore.applyEvent(evt, projectStore.projects);
+      releasedPendingToast.delete(evt.session_id);
+      // 作業継続中の保持（260908_1）: Stop と許可要求以外の Notification は、ループ進行中・バックグラウンド作業の
+      // 完了待ちなら「完了」「確認待ち」にせず実行中を保つ（Monitor 起床のたびに Stop が来る司令塔セッション向け）
+      const holdCandidate =
+        evt.hook_event_name === "Stop" ||
+        (evt.hook_event_name === "Notification" && classifyNotification(evt.message, evt.notification_type) !== "permission");
+      let hold: string | undefined;
+      if (holdCandidate) {
+        refreshLoopStatusForEvent(evt.session_id, evt.cwd);
+        hold = heldReasonFor(evt.session_id, readSessionRegistry());
+      }
+      const result = stateStore.applyEvent(evt, projectStore.projects, { holdRunning: hold !== undefined });
       if (result === null) {
         // design.md 10 章: 未登録 cwd・正常 SessionEnd は破棄してログのみ（UI は変えない）
         logger.info(`event 破棄: ${evt.hook_event_name} cwd=${evt.cwd}`);
+        return;
+      }
+      if (evt.hook_event_name === "SessionStart") {
+        // 新しいセッションの開始（260909_1）: 同じプロジェクトの終了済み・切断の記録を消した。表示は待機へ戻る
+        for (const sid of result.prunedSessions ?? []) {
+          cancelPendingStopCheck(sid);
+          lastNotifiedState.delete(sid);
+          heldSessions.delete(sid);
+          releasedPendingToast.delete(sid);
+          loopStatusCache.delete(sid);
+        }
+        logger.info(
+          `event 受信: SessionStart（source=${evt.source ?? "?"}）→ 終了済み・切断の記録を ${result.prunedSessions?.length ?? 0} 件消去 (project=${result.projectId}, session=${result.sessionId})`
+        );
+        broadcast(receivedAt);
         return;
       }
       if (result.discardedRunning === true) {
         // 正常 SessionEnd: 実行中のまま終了したセッションの記録を破棄（260712 課題A の幽霊実行中防止）
         logger.info(`event 受信: SessionEnd（正常終了）→ 実行中セッションの記録を破棄 (project=${result.projectId}, session=${result.sessionId})`);
       } else {
-        const detail = evt.hook_event_name === "Notification" ? ` 種別=${classifyNotification(evt.message)}` : "";
+        const detail =
+          evt.hook_event_name === "Notification"
+            ? ` 種別=${classifyNotification(evt.message, evt.notification_type)}${evt.notification_type !== undefined ? `(${evt.notification_type})` : ""}`
+            : "";
+        const heldNote = hold !== undefined ? `（実行中を維持: ${hold}）` : "";
         logger.info(
-          `event 受信: ${evt.hook_event_name}${detail} → ${result.state} (project=${result.projectId}, session=${result.sessionId})`
+          `event 受信: ${evt.hook_event_name}${detail} → ${result.state}${heldNote} (project=${result.projectId}, session=${result.sessionId})`
         );
       }
+      if (hold !== undefined) heldSessions.set(result.sessionId, hold);
       // 完了・確認待ちのトースト通知（260712_5）。状態が実際に変化したときのみ通知する
       // （同一状態への再遷移では通知しない = 過剰通知の抑制）
-      const notify = shouldNotify(lastNotifiedState.get(result.sessionId), result.state);
       const project = projectStore.getProject(result.projectId);
-      if (result.state === "done") {
+      if (evt.hook_event_name === "Stop") {
+        // 保持中の Stop は「完了」にしていないので、通知要否は「完了になったとしたら」で判定する
+        const notify = shouldNotify(lastNotifiedState.get(result.sessionId), "done");
         // 完了トーストは前倒し判定の後（最大 STOP_RECHECK_DELAY_MS 遅れ）— block された Stop で誤通知しないため（260907_1 R6）
-        scheduleStopRecheck(result.sessionId, notify, project);
-      } else if (notify && project !== null && result.state === "confirm") {
+        scheduleStopRecheck(result.sessionId, notify, project, evt.cwd, hold !== undefined);
+      } else if (result.state === "confirm" && project !== null && shouldNotify(lastNotifiedState.get(result.sessionId), "confirm")) {
         showSessionToast(project, `${project.name}: 確認が必要です`, "権限確認や入力待ちが発生しています。");
       }
       lastNotifiedState.set(result.sessionId, result.state);
@@ -348,6 +546,22 @@ function focusOwnWindow(): void {
  * 前面化するフォールバックにする（何も起きないより、タイル一覧からの手動操作に繋げられる方がよい）。
  * 通知音は REQ-12（次期）まで鳴らさない = silent 固定。
  */
+/**
+ * プロジェクトのウィンドウを前面化する（タイルクリック・通知クリック共通。260916_5）。
+ * タイトル一致で見つからず、Cursor 自身の windowsState がそのフォルダを「開いている」と記録していれば
+ * （Agents 表示の窓はタイトルが「Cursor Agents」固定でフォルダ名を含まない）、`Cursor.exe <folder>` を
+ * --new-window 無しで起動して Cursor に既存ウィンドウの前面化を任せる
+ */
+async function focusProject(project: Project): Promise<FocusOutcome> {
+  const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
+  if (outcome.ok || project.clickTarget !== "cursor") return outcome;
+  const open = findCursorOpenWindow(project.path, readCursorOpenWindows(), project.workspacePath);
+  if (open === undefined) return outcome;
+  const launched = await launchProjectApp("cursor", project.path, project.workspacePath, { newWindow: false });
+  if (!launched.ok) return { ok: false, message: `${outcome.message ?? "ウィンドウが見つかりません"} / Cursor 経由の前面化も失敗: ${launched.message ?? ""}` };
+  return { ok: true, message: `Cursor に既存ウィンドウの前面化を依頼${open.glassMode ? "（Agents 表示）" : ""}` };
+}
+
 function showSessionToast(project: Project | null, title: string, body: string): void {
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body, silent: true });
@@ -356,9 +570,10 @@ function showSessionToast(project: Project | null, title: string, body: string):
       focusOwnWindow();
       return;
     }
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
-    logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
-    if (!outcome.ok) focusOwnWindow();
+    void focusProject(project).then((outcome) => {
+      logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
+      if (!outcome.ok) focusOwnWindow();
+    });
   });
   n.show();
 }
@@ -382,16 +597,9 @@ const loopBadgeShown = new Set<string>();
 function updateLoopTexts(): boolean {
   const ids = stateStore.sessionIds();
   if (ids.length === 0) return false;
-  let texts: Map<string, string>;
-  try {
-    texts = loopTextForSessions(ids, { evalLoopDir: evalLoopDir(), now: Date.now() });
-  } catch (e) {
-    logger.warn(`ループ進捗の読み取りに失敗（前回値を維持）: ${String(e)}`);
-    return false;
-  }
   let changed = false;
   for (const sid of ids) {
-    const text = texts.get(sid);
+    const text = loopStatusCache.get(sid)?.text;
     if (!stateStore.applyLoopText(sid, text)) continue;
     changed = true;
     const shown = loopBadgeShown.has(sid);
@@ -419,6 +627,22 @@ function updateLoopTexts(): boolean {
 const DEAD_STRIKES_REQUIRED = 2;
 /** sessionId → 連続で終了と観測した回数 */
 const deadStrikes = new Map<string, number>();
+/**
+ * 登録簿で一度でも「生存」と観測したセッション（260916_2）。
+ * 登録簿に一度も載らないセッション（eval-loop の子 `claude -p` 等。2026-09-16 実測: 1 日 10 本が UserPromptSubmit → Stop の
+ * 2 イベントだけで、登録簿に無いため 20 秒で「切断」→ 破棄 → Stop で復活 → 完了トースト、を繰り返した）は、
+ * 実行中の間は登録簿の「無い」を終了の根拠にしない（終了検知・切断検知は transcript 側の判定に任せる）。
+ * 実行中でなくなれば従来どおり終了済みにして、同じプロジェクトに生存があれば記録を破棄する
+ */
+const seenAliveInRegistry = new Set<string>();
+
+/** そのセッションが今タイルに出ているか（1 タイル表示の代表、または分割タイルの 1 本）。表示外の完了は通知しない（260916_2） */
+function isDisplayedSession(projectId: string, sessionId: string): boolean {
+  const view = stateStore.displaySessions(projectStore.projects)[projectId];
+  if (view !== undefined && view.sessionId === sessionId) return true;
+  const split = stateStore.splitSessions(projectStore.projects)[projectId];
+  return split !== undefined && split.some((v) => v.sessionId === sessionId);
+}
 
 /**
  * 1 掃引（15 秒ごと）:
@@ -438,13 +662,20 @@ function sweepLiveness(): void {
   let changed = false;
 
   const registry = readSessionRegistry();
+  // ループ状況の読み直し（260908_1）: 以降の保持判定・バッジ更新はこの掃引で読んだ値を使う
+  refreshLoopStatus();
+  const held = (sid: string): string | undefined => heldReasonFor(sid, registry);
   if (registry !== null) {
+    const runningIds = new Set(stateStore.runningSessions().map((t) => t.sessionId));
     for (const sid of stateStore.sessionIds()) {
       if (classifyLiveness(registry, sid) === "alive") {
+        seenAliveInRegistry.add(sid);
         deadStrikes.delete(sid);
         if (stateStore.setDead(sid, false)) changed = true;
         continue;
       }
+      // 登録簿に一度も載らないセッションは、実行中の間は登録簿を終了の根拠にしない（260916_2）
+      if (!seenAliveInRegistry.has(sid) && runningIds.has(sid)) continue;
       const strikes = (deadStrikes.get(sid) ?? 0) + 1;
       deadStrikes.set(sid, strikes);
       if (strikes < DEAD_STRIKES_REQUIRED) continue;
@@ -460,6 +691,7 @@ function sweepLiveness(): void {
     const pruned = stateStore.pruneDeadSessions();
     for (const sid of pruned) {
       deadStrikes.delete(sid);
+      seenAliveInRegistry.delete(sid);
       lastNotifiedState.delete(sid);
     }
     if (pruned.length > 0) {
@@ -474,15 +706,17 @@ function sweepLiveness(): void {
       now: () => Date.now(),
       mtimeMs: statMtimeMs,
       registryStatus: (sid) => registryStatusOf(registry, sid),
+      heldReason: held,
+      turnEnd: turnEndOf,
     });
     for (const hit of resumed) {
       if (!stateStore.resumeFromConfirm(hit.target.sessionId)) continue;
       changed = true;
       lastNotifiedState.set(hit.target.sessionId, "running"); // 次の確認待ちで再び通知できるように
       const project = projectStore.getProject(hit.target.projectId);
-      logger.info(
-        `確認待ちから復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${hit.reason === "registry" ? "登録簿 status=busy" : "許可後に transcript が更新"}`
-      );
+      const why =
+        hit.reason === "registry" ? "登録簿 status=busy" : hit.reason === "held" ? (hit.heldReason ?? "作業継続中") : "許可後に transcript が更新";
+      logger.info(`確認待ちから復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${why}`);
     }
   }
 
@@ -501,12 +735,17 @@ function sweepLiveness(): void {
   if (updateLoopTexts()) changed = true;
 
   const targets = stateStore.runningSessions();
+  // 保持の開始・解除を記録（260908_1）。実行中でなくなったセッションの記録は消す
+  trackHeld(targets.map((t) => t.sessionId), held);
+  for (const sid of [...heldSessions.keys()]) {
+    if (!targets.some((t) => t.sessionId === sid)) heldSessions.delete(sid);
+  }
   if (targets.length === 0) {
     if (changed) broadcast();
     return;
   }
 
-  const concludedHits = findConcluded(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf });
+  const concludedHits = findConcluded(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf, heldReason: held });
   const concludedIds = new Set<string>();
   for (const t of concludedHits) {
     if (!stateStore.markConcluded(t.sessionId)) continue;
@@ -516,6 +755,26 @@ function sweepLiveness(): void {
     logger.info(
       `終了検知: ${project?.name ?? t.projectId} (session=${t.sessionId}) — Stop 未受信だが transcript がターン完了を示すため「完了」へ`
     );
+    // 保持が解けた直後の終了検知（ループ終了・バックグラウンド作業終了）は本当の完了なのでトーストを出す（260908_1）
+    if (releasedPendingToast.has(t.sessionId) && shouldNotify(lastNotifiedState.get(t.sessionId), "done")) {
+      showReleasedToast(t.sessionId, project);
+    }
+    releasedPendingToast.delete(t.sessionId);
+  }
+
+  // (2') 待機中の取り残し（260909_1）: 登録簿 idle のまま transcript が止まっているものは「完了」へ（切断ではない）
+  for (const t of findIdleConcluded(targets.filter((t) => !concludedIds.has(t.sessionId)), {
+    now: () => Date.now(),
+    mtimeMs: activityMtimeMs,
+    registryStatus: (sid) => registryStatusOf(registry, sid),
+    heldReason: held,
+  })) {
+    if (!stateStore.markConcluded(t.sessionId)) continue;
+    changed = true;
+    concludedIds.add(t.sessionId);
+    const project = projectStore.getProject(t.projectId);
+    logger.info(`終了検知: ${project?.name ?? t.projectId} (session=${t.sessionId}) — 登録簿 status=idle のまま transcript が無更新のため「完了」へ`);
+    releasedPendingToast.delete(t.sessionId);
   }
 
   const rest = targets.filter((t) => !concludedIds.has(t.sessionId));
@@ -524,7 +783,7 @@ function sweepLiveness(): void {
     const project = projectStore.getProject(projectId);
     if (project === null || !windowApiAvailable()) return null; // 判定不能 → liveness-monitor 側で安全側に扱う
     if (windows === null) windows = listTopLevelWindows();
-    return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
+    return projectWindowPresent(project, windows, readCursorOpenWindows());
   };
   // 無更新の判定は subagent 記録も含めた最終活動時刻で行い、登録簿が busy の間は切断しない（260907_1 R4）
   const hits = findDisconnected(rest, {
@@ -532,6 +791,7 @@ function sweepLiveness(): void {
     mtimeMs: activityMtimeMs,
     windowPresent,
     registryStatus: (sid) => registryStatusOf(registry, sid),
+    heldReason: held,
   });
   for (const t of hits) {
     if (!stateStore.markDisconnected(t.sessionId)) continue;
@@ -556,7 +816,7 @@ function pollWindowPresence(): void {
   let next: WindowPresence = {};
   if (windowApiAvailable() && projectStore.projects.length > 0) {
     try {
-      next = computeWindowPresence(projectStore.projects, listTopLevelWindows());
+      next = computeWindowPresence(projectStore.projects, listTopLevelWindows(), readCursorOpenWindows());
     } catch (e) {
       logger.warn(`ウィンドウ有無の判定に失敗（前回値を維持）: ${String(e)}`);
       return;
@@ -581,10 +841,11 @@ function pollWindowPresence(): void {
 }
 
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
-function registerProject(dirPath: string): RegisterResult {
+function registerProject(dirPath: string, workspacePath?: string): RegisterResult {
   // 事前検証は ProjectStore と共通の validateProjectDir に集約
   // （hooks マージより先に弾くことで、無効パスへの .claude/ 作成を防ぐ）
-  const valid = validateProjectDir(dirPath, projectStore.projects);
+  const existing = workspacePath === undefined ? undefined : projectStore.projects.find((p) => normalizePath(p.path) === normalizePath(dirPath));
+  const valid = validateProjectDir(dirPath, projectStore.projects.filter((p) => p !== existing));
   if (!valid.ok) {
     return { ok: false, path: dirPath, error: valid.error };
   }
@@ -598,7 +859,15 @@ function registerProject(dirPath: string): RegisterResult {
   const sl = mergeStatusLine(dirPath, projectStore.config.port);
   if (!sl.ok) logger.warn(`statusLine 設定失敗（登録は続行）: ${dirPath} — ${sl.error}`);
   else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${dirPath}`);
-  const added = projectStore.addProject(dirPath);
+  // 260916_4 以前に共有 settings.json へ書いた分があれば settings.local.json へ移した後で取り除く
+  const mig = migrateLegacyHooks(dirPath, ALL_HOOK_EVENTS);
+  if (!mig.ok) logger.warn(`settings.json からの移行に失敗（登録は続行）: ${dirPath} — ${mig.error}`);
+  else if (mig.changed) logger.info(`hooks / statusLine を settings.json から settings.local.json へ移行: ${dirPath}`);
+  if (existing !== undefined && workspacePath !== undefined) {
+    projectStore.setWorkspacePath(existing.id, workspacePath);
+    return { ok: true, path: dirPath, projectId: existing.id };
+  }
+  const added = projectStore.addProject(dirPath, "cursor", workspacePath);
   if (!added.ok || added.project === undefined) {
     removeHooks(dirPath, ALL_HOOK_EVENTS); // 追加に失敗したらマージを巻き戻す
     removeStatusLine(dirPath);
@@ -606,6 +875,17 @@ function registerProject(dirPath: string): RegisterResult {
   }
   logger.info(`プロジェクト登録: ${dirPath} (hooks 書込=${merged.changed}, statusLine=${sl.skipped === true ? "skip" : String(sl.changed)})`);
   return { ok: true, path: dirPath, projectId: added.project.id };
+}
+
+/** workspace の収録フォルダを設定の基点とし、保存先フォルダへの誤登録を防ぐ。 */
+function registerProjectPath(droppedPath: string): RegisterResult[] {
+  let locations: ReturnType<typeof resolveProjectLocations>;
+  try {
+    locations = resolveProjectLocations(droppedPath);
+  } catch {
+    return [{ ok: false, path: droppedPath, error: "ワークスペースのローカルフォルダを解決できません。folders と参照先を確認してください" }];
+  }
+  return locations.map((location) => registerProject(location.path, location.workspacePath));
 }
 
 /** 登録解除の本体（設定画面の IPC と右クリックメニューの両方から呼ぶ。260712_2 でハンドラから抽出） */
@@ -619,18 +899,25 @@ async function unregisterProjectById(id: string): Promise<OpResult> {
       `dev-server 停止（登録解除に伴う）${stopped.ok ? "成功" : "失敗"}: ${project.name}${stopped.error !== undefined ? ` — ${stopped.error}` : ""}`
     );
   }
+  // settings.local.json（現行）と共有 settings.json（260916_4 以前の書き込み先）の両方から自アプリ分を除く
   const removed = removeHooks(project.path, ALL_HOOK_EVENTS);
-  if (!removed.ok) {
+  const removedLegacy = removed.ok ? removeHooks(project.path, ALL_HOOK_EVENTS, SETTINGS_FILE) : removed;
+  if (!removed.ok || !removedLegacy.ok) {
     // design.md 4.2 除去: パース失敗時は中断（手動対応を促す）。登録は残す
-    logger.error(`hooks 除去失敗: ${project.path} — ${removed.error}`);
-    setStatus(`hooks を除去できません（手動確認が必要）: ${removed.error ?? ""}`);
-    return { ok: false, error: removed.error };
+    const error = removed.error ?? removedLegacy.error;
+    logger.error(`hooks 除去失敗: ${project.path} — ${error}`);
+    setStatus(`hooks を除去できません（手動確認が必要）: ${error ?? ""}`);
+    return { ok: false, error };
   }
   const slRemoved = removeStatusLine(project.path);
   if (!slRemoved.ok) logger.warn(`statusLine 除去失敗（解除は続行）: ${project.path} — ${slRemoved.error}`);
+  const slRemovedLegacy = removeStatusLine(project.path, SETTINGS_FILE);
+  if (!slRemovedLegacy.ok) logger.warn(`statusLine 除去失敗（settings.json。解除は続行）: ${project.path} — ${slRemovedLegacy.error}`);
   projectStore.removeProject(id);
   stateStore.removeProjectSessions(id); // 解除済みプロジェクトのセッションを保持し続けない（メモリ整理）
-  logger.info(`プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed}, statusLine 除去=${slRemoved.changed})`);
+  logger.info(
+    `プロジェクト登録解除: ${project.path} (hooks 除去=${removed.changed || removedLegacy.changed}, statusLine 除去=${slRemoved.changed || slRemovedLegacy.changed})`
+  );
   broadcast();
   return { ok: true };
 }
@@ -770,11 +1057,11 @@ function devServerMenuItems(id: string, projectPath: string): Electron.MenuItemC
  * 前面化（focusProject）は既存ウィンドウ限定のため、アプリを閉じた後の復帰はこちらを使う。
  * 起動後のセッション復元は従来どおり「再接続」（イベントが届けば自動でも再表示される）。
  */
-function launchProject(id: string): void {
+async function launchProject(id: string): Promise<void> {
   const project = projectStore.getProject(id);
   if (project === null) return;
   const appName = project.clickTarget === "cursor" ? "Cursor" : "ターミナル";
-  const outcome = launchProjectApp(project.clickTarget, project.path);
+  const outcome = await launchProjectApp(project.clickTarget, project.path, project.workspacePath);
   logger.info(
     `立ち上げ ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`
   );
@@ -798,6 +1085,7 @@ function removeSessionDisplay(id: string, sessionId: string): void {
   if (project === null) return;
   if (!stateStore.removeSession(sessionId)) return;
   deadStrikes.delete(sessionId);
+  seenAliveInRegistry.delete(sessionId);
   lastNotifiedState.delete(sessionId);
   logger.info(`枠を消去: ${project.name} (session=${sessionId})`);
   setStatus(`${project.name} の枠を 1 つ消しました`);
@@ -828,7 +1116,7 @@ function cancelAllPendingRestores(): void {
 function saveWindowBounds(id: string, quiet = false): boolean {
   const project = projectStore.getProject(id);
   if (project === null) return false;
-  const r = readProjectWindowPlacement(project.clickTarget, path.basename(project.path));
+  const r = readProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.workspacePath);
   if (!r.ok) {
     logger.info(`ウィンドウ位置の記憶 失敗: ${project.name} — ${r.message}`);
     if (!quiet) setStatus(`${project.name}: ${r.message}`);
@@ -856,7 +1144,7 @@ function saveWindowBounds(id: string, quiet = false): boolean {
 function restoreWindowBounds(id: string, quiet = false): boolean {
   const project = projectStore.getProject(id);
   if (project === null || project.windowBounds === undefined) return false;
-  const r = applyProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.windowBounds);
+  const r = applyProjectWindowPlacement(project.clickTarget, path.basename(project.path), project.windowBounds, project.workspacePath);
   logger.info(`ウィンドウ位置を復元 ${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
   if (!quiet) setStatus(r.ok ? `${project.name} のウィンドウを記憶した位置へ戻しました` : `${project.name}: ${r.message ?? "復元に失敗しました"}`);
   return r.ok;
@@ -924,7 +1212,7 @@ function scheduleRestoreAfterLaunch(id: string): void {
     const folder = path.basename(project.path);
     const now = Date.now();
     if (seenAt === null) {
-      if (readProjectWindowPlacement(project.clickTarget, folder).ok) {
+      if (readProjectWindowPlacement(project.clickTarget, folder, project.workspacePath).ok) {
         seenAt = now;
       } else if (now - startedAt > LAUNCH_RESTORE_TIMEOUT_MS) {
         cancelPendingRestore(id);
@@ -933,7 +1221,7 @@ function scheduleRestoreAfterLaunch(id: string): void {
       return;
     }
     if (now - seenAt < LAUNCH_RESTORE_SETTLE_MS * (applied + 1)) return;
-    const r = applyProjectWindowPlacement(project.clickTarget, folder, project.windowBounds);
+    const r = applyProjectWindowPlacement(project.clickTarget, folder, project.windowBounds, project.workspacePath);
     applied += 1;
     logger.info(`ウィンドウ位置の自動復元（${applied} 回目）${r.ok ? "成功" : "失敗"}: ${project.name} → ${fmtWindowBounds(project.windowBounds)}${r.message ? ` (${r.message})` : ""}`);
     if (!r.ok || applied >= 2) {
@@ -1006,7 +1294,7 @@ function wireIpc(): void {
     // フォルダはそのまま登録し、ファイルのドロップのみ .claude / .git を目印にルートへ読み替える
     // （260729 改定: フォルダの祖先探索は「開発案件/」等の親フォルダ誤登録を招くため廃止）。
     // 解決不能（パス不存在）は元パスのまま registerProject の検証エラーに落とす
-    const results = paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = paths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1031,7 +1319,7 @@ function wireIpc(): void {
       // Cursor（VS Code 系）のツリードラッグは OS ドラッグにパス情報が載らない（OLE プローブで実証済み）
       return [{ ok: false, path: "", error: "ドロップにパス情報がありません（Cursor のツリーからは登録不可）。エクスプローラからドロップするか、＋ボタンで選択してください" }];
     }
-    const results = extracted.paths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = extracted.paths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1045,7 +1333,7 @@ function wireIpc(): void {
     });
     if (picked.canceled || picked.filePaths.length === 0) return [];
     logger.info(`フォルダ選択登録: ${picked.filePaths.join(" | ")}`);
-    const results = picked.filePaths.map((p) => registerProject(resolveProjectRoot(p) ?? p));
+    const results = picked.filePaths.flatMap(registerProjectPath);
     broadcast();
     return results;
   });
@@ -1097,7 +1385,7 @@ function wireIpc(): void {
       },
     ];
     const menu = Menu.buildFromTemplate([
-      { label: launchLabel, click: () => { launchProject(id); } },
+      { label: launchLabel, click: () => { void launchProject(id); } },
       ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
@@ -1183,11 +1471,11 @@ function wireIpc(): void {
     broadcast();
   });
 
-  ipcMain.handle("focus-project", (_e, id: string) => {
+  ipcMain.handle("focus-project", async (_e, id: string) => {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
     // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
+    const outcome = await focusProject(project);
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     return outcome;
@@ -1298,6 +1586,10 @@ void app.whenReady().then(async () => {
       if (!sl.ok) logger.warn(`statusLine 追補失敗: ${p.path} — ${sl.error}`);
       else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${p.path}`);
       else if (sl.changed) logger.info(`statusLine 転送を追補: ${p.path}`);
+      // 260916_4: 共有 settings.json に残っている自アプリ分を取り除く（local への追記が済んだ後）。冪等
+      const mig = migrateLegacyHooks(p.path, ALL_HOOK_EVENTS);
+      if (!mig.ok) logger.warn(`settings.json からの移行に失敗: ${p.path} — ${mig.error}`);
+      else if (mig.changed) logger.info(`hooks / statusLine を settings.json から settings.local.json へ移行: ${p.path}`);
     }
   }
 

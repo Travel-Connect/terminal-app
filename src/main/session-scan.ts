@@ -47,6 +47,17 @@ export type TurnEndState = "concluded" | "open" | "unknown";
 /** 割り込み時に transcript へ記録されるマーカー（2026-07-12 実測: "[Request interrupted by user for tool use]" 等） */
 const INTERRUPT_MARKER = "[Request interrupted";
 
+/**
+ * ローカルコマンド（/effort /model /clear 等。LLM のターンを起こさない）の痕跡（260909_1）。
+ * 2026-09-09 実測: `<local-command-caveat>…` / `<command-name>/effort</command-name>…` / `<local-command-stdout>…` の
+ * user レコード 3 件が並んで書かれる。ターン開始ではないので終端分類では読み飛ばす
+ * （これを「open」と誤読すると、入力待ちのセッションが実行中扱いになり 15 分後に「切断」へ倒れる）
+ */
+function isLocalCommandRecord(text: string): boolean {
+  const t = text.trimStart();
+  return t.startsWith("<local-command-") || t.startsWith("<command-name>") || t.startsWith("<command-message>");
+}
+
 /** レコード先頭の text（string content または最初の text ブロック）。無ければ undefined */
 function firstTextOf(rec: Record<string, unknown>): string | undefined {
   const message = rec.message as Record<string, unknown> | undefined;
@@ -94,8 +105,9 @@ export function classifyTurnEnd(records: ReadonlyArray<Record<string, unknown>>)
       continue; // local_command 等の system メタはスキップ
     }
     if (type === "user") {
-      if (sawTurnDuration) return "concluded";
       const text = firstTextOf(rec);
+      if (text !== undefined && isLocalCommandRecord(text)) continue; // ローカルコマンドの痕跡はターンではない（260909_1）
+      if (sawTurnDuration) return "concluded";
       if (text !== undefined && text.trim().startsWith(INTERRUPT_MARKER)) return "concluded";
       return "open"; // プロンプト・tool_result はターン開始直後/進行中
     }
@@ -165,6 +177,35 @@ export function activityMtimeMs(transcriptPath: string): number | null {
     }
   }
   return latest;
+}
+
+/**
+ * hook payload の transcript_path として受け入れる親ディレクトリ（260916_3）。
+ * 受信サーバに届いた任意のパスをそのまま open していたため、偽イベントでアプリに任意ファイルを読ませられた。
+ * 既定は `~/.claude/projects`。検証用に `TERMINAL_APP_DATA_DIR`（E2E は擬似 transcript をここに置く）と
+ * `TERMINAL_APP_TRANSCRIPT_DIRS`（path.delimiter 区切り）を足せる
+ */
+export function transcriptRoots(env: NodeJS.ProcessEnv = process.env, homeDir: string = os.homedir()): string[] {
+  const roots = [path.join(homeDir, ".claude", "projects")];
+  const dataDir = env.TERMINAL_APP_DATA_DIR;
+  if (dataDir !== undefined && dataDir.trim() !== "") roots.push(dataDir);
+  const extra = env.TERMINAL_APP_TRANSCRIPT_DIRS;
+  if (extra !== undefined && extra.trim() !== "") {
+    for (const d of extra.split(path.delimiter)) if (d.trim() !== "") roots.push(d);
+  }
+  return roots;
+}
+
+/** transcript_path が許可された親ディレクトリ配下の .jsonl か（`..` は path.resolve で潰す。大文字小文字は無視） */
+export function isAllowedTranscriptPath(transcriptPath: string, roots: readonly string[]): boolean {
+  if (typeof transcriptPath !== "string" || transcriptPath.trim() === "") return false;
+  const resolved = path.resolve(transcriptPath);
+  if (!resolved.toLowerCase().endsWith(".jsonl")) return false;
+  const resolvedN = normalizePath(resolved);
+  return roots.some((root) => {
+    const rootN = normalizePath(path.resolve(root));
+    return resolvedN.startsWith(rootN + "\\");
+  });
 }
 
 export function mungeProjectPath(projectPath: string): string {

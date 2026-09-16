@@ -15,6 +15,25 @@ function deps(env: ResolveDeps["env"], existing: string[]): ResolveDeps {
 }
 
 describe("resolveLaunchCommand: cursor", () => {
+  it("引用符付き PATH と任意のインストールフォルダ名から解決する", () => {
+    const install = "C:\\Tools\\Cursor Stable";
+    const exe = path.join(install, "Cursor.exe");
+    const bin = path.join(install, "resources", "app", "bin");
+    const cmd = resolveLaunchCommand("cursor", PROJECT, deps({ PATH: `  "${bin}"  ` }, [exe]));
+    expect(cmd).toEqual({ exe, args: ["--new-window", PROJECT] });
+  });
+
+  it("PATH に直接置かれた Cursor.exe を既定インストールより優先する", () => {
+    const install = "C:\\Tools\\Cursor Portable";
+    const exe = path.join(install, "Cursor.exe");
+    const local = "C:\\Users\\me\\AppData\\Local";
+    const cmd = resolveLaunchCommand("cursor", PROJECT, deps(
+      { PATH: `"${install}"`, LOCALAPPDATA: local },
+      [exe, path.join(local, "Programs", "cursor", "Cursor.exe")]
+    ));
+    expect(cmd?.exe).toBe(exe);
+  });
+
   it("PATH の cursor bin エントリから Cursor.exe を導出する（最優先）", () => {
     const bin = "C:\\Program Files\\cursor\\resources\\app\\bin";
     const exe = "C:\\Program Files\\cursor\\Cursor.exe";
@@ -29,7 +48,7 @@ describe("resolveLaunchCommand: cursor", () => {
     const cmd = resolveLaunchCommand("cursor", PROJECT, d);
     expect(cmd).not.toBeNull();
     expect(path.normalize(cmd!.exe)).toBe(path.normalize(exe));
-    expect(cmd!.args).toEqual([PROJECT]);
+    expect(cmd!.args).toEqual(["--new-window", PROJECT]);
   });
 
   it("PATH に cursor bin が無ければ %LOCALAPPDATA%\\Programs\\cursor へフォールバックする", () => {
@@ -69,6 +88,17 @@ describe("resolveLaunchCommand: cursor", () => {
   it("どの候補も実在しなければ null（呼び出し側がエラーメッセージにする）", () => {
     const d = deps({ PATH: "C:\\Windows", LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" }, []);
     expect(resolveLaunchCommand("cursor", PROJECT, d)).toBeNull();
+  });
+});
+
+describe("resolveLaunchCommand: cursor の newWindow オプション（260916_5）", () => {
+  it("既定は --new-window 付き。newWindow=false なら無し（既存ウィンドウの前面化を Cursor に任せる）", () => {
+    const exe = "C:\\Program Files\\cursor\\Cursor.exe";
+    const d = deps({ ProgramFiles: "C:\\Program Files" }, [exe]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d)?.args).toEqual(["--new-window", PROJECT]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d, { newWindow: true })?.args).toEqual(["--new-window", PROJECT]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d, { newWindow: false })?.args).toEqual([PROJECT]);
+    expect(resolveLaunchCommand("terminal", PROJECT, deps({ LOCALAPPDATA: "C:\\LA" }, ["C:\\LA\\Microsoft\\WindowsApps\\wt.exe"]), { newWindow: false })?.args).toEqual(["-d", PROJECT]);
   });
 });
 
