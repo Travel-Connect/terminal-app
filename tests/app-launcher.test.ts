@@ -91,6 +91,17 @@ describe("resolveLaunchCommand: cursor", () => {
   });
 });
 
+describe("resolveLaunchCommand: cursor の newWindow オプション（260916_5）", () => {
+  it("既定は --new-window 付き。newWindow=false なら無し（既存ウィンドウの前面化を Cursor に任せる）", () => {
+    const exe = "C:\\Program Files\\cursor\\Cursor.exe";
+    const d = deps({ ProgramFiles: "C:\\Program Files" }, [exe]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d)?.args).toEqual(["--new-window", PROJECT]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d, { newWindow: true })?.args).toEqual(["--new-window", PROJECT]);
+    expect(resolveLaunchCommand("cursor", PROJECT, d, { newWindow: false })?.args).toEqual([PROJECT]);
+    expect(resolveLaunchCommand("terminal", PROJECT, deps({ LOCALAPPDATA: "C:\\LA" }, ["C:\\LA\\Microsoft\\WindowsApps\\wt.exe"]), { newWindow: false })?.args).toEqual(["-d", PROJECT]);
+  });
+});
+
 describe("resolveLaunchCommand: terminal", () => {
   it("PATH 上の wt.exe を -d <projectPath> 付きで解決する", () => {
     const wtDir = "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps";

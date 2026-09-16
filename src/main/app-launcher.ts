@@ -70,14 +70,24 @@ function terminalCandidates(deps: ResolveDeps): string[] {
  * clickTarget → 起動コマンド（exe と引数）の解決。見つからなければ null。
  * 候補はすべて deps.exists で実在確認する（PATH に残った古いエントリを拾わない）
  */
+export interface LaunchOptions {
+  /**
+   * false のとき Cursor を `--new-window` 無しで起動する（260916_5）: 既に開いているフォルダなら Cursor が
+   * 既存ウィンドウを前面化する（タイトルで見つけられない Agents 表示の窓の前面化に使う）
+   */
+  newWindow?: boolean;
+}
+
 export function resolveLaunchCommand(
   target: ClickTarget,
   projectPath: string,
-  deps: ResolveDeps
+  deps: ResolveDeps,
+  opts: LaunchOptions = {}
 ): LaunchCommand | null {
   if (target === "cursor") {
     const exe = cursorCandidates(deps).find(deps.exists);
-    return exe !== undefined ? { exe, args: ["--new-window", projectPath] } : null;
+    if (exe === undefined) return null;
+    return { exe, args: opts.newWindow === false ? [projectPath] : ["--new-window", projectPath] };
   }
   const exe = terminalCandidates(deps).find(deps.exists);
   return exe !== undefined ? { exe, args: ["-d", projectPath] } : null;
@@ -103,12 +113,15 @@ function fileExists(p: string): boolean {
 export async function launchProjectApp(
   target: ClickTarget,
   projectPath: string,
-  workspacePath?: string
+  workspacePath?: string,
+  opts: LaunchOptions = {}
 ): Promise<LaunchOutcome> {
-  const cmd = resolveLaunchCommand(target, target === "cursor" ? workspacePath ?? projectPath : projectPath, {
-    env: process.env,
-    exists: fileExists,
-  });
+  const cmd = resolveLaunchCommand(
+    target,
+    target === "cursor" ? workspacePath ?? projectPath : projectPath,
+    { env: process.env, exists: fileExists },
+    opts
+  );
   if (cmd === null) {
     return {
       ok: false,

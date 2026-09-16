@@ -230,7 +230,31 @@ export function matchesProjectWindow(target: ClickTarget, folderName: string, wi
     names.push(path.win32.basename(workspacePath).replace(/\.code-workspace$/i, ""));
   }
   const title = window.title.toLowerCase();
+  if (target === "cursor") return matchesCursorTitle(title, names);
   return names.some((name) => name.trim() !== "" && title.includes(name.toLowerCase()));
+}
+
+/**
+ * Cursor のタイトル一致（260916_5）。既定のタイトルは `[● ]<file> - <folder> - Cursor` / `<folder> - Cursor` /
+ * `<file> - <name> (Workspace) - Cursor`（区切りは " - "。macOS 由来の " — " も同じ扱い）。
+ * 旧実装の部分一致は、登録名「dev」が `dev-server.ts - 他プロジェクト - Cursor` に一致するなど誤前面化の素地だった
+ * （2026-09-16 レビュー H7）ので、末尾「Cursor」の直前のセグメントがフォルダ名（または `<name> (workspace)`）と
+ * 完全一致するときだけ一致とする。フォルダ名に " - " を含む場合も、末尾一致で扱えるようセグメント分割はしない。
+ * 「Cursor Agents」（Agents 表示の固定タイトル）のように末尾が " - cursor" でない窓は判別できないので不一致
+ * （その窓は cursor-state.ts の windowsState で補う）。
+ */
+function matchesCursorTitle(titleLower: string, names: readonly string[]): boolean {
+  const t = titleLower.replace(/ — /g, " - ").replace(/^●\s*/, "");
+  if (!t.endsWith(" - cursor")) return false;
+  const subject = t.slice(0, -" - cursor".length);
+  return names.some((name) => {
+    const n = name.trim().toLowerCase();
+    if (n === "") return false;
+    for (const s of [n, `${n} (workspace)`]) {
+      if (subject === s || subject.endsWith(` - ${s}`)) return true;
+    }
+    return false;
+  });
 }
 
 export function hasWindowFor(target: ClickTarget, folderName: string, windows: readonly TopLevelWindow[], workspacePath?: string): boolean {

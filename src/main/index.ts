@@ -19,6 +19,7 @@ import * as path from "path";
 import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
+import { findCursorOpenWindow, readCursorOpenWindows } from "./cursor-state";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
@@ -49,13 +50,13 @@ import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
   focusProjectWindow,
-  hasWindowFor,
   isAvailable as windowApiAvailable,
   listTopLevelWindows,
   readProjectWindowPlacement,
+  type FocusOutcome,
   type TopLevelWindow,
 } from "./window-control";
-import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
+import { computeWindowPresence, presenceDiff, presenceEquals, projectWindowPresent, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -545,6 +546,22 @@ function focusOwnWindow(): void {
  * 前面化するフォールバックにする（何も起きないより、タイル一覧からの手動操作に繋げられる方がよい）。
  * 通知音は REQ-12（次期）まで鳴らさない = silent 固定。
  */
+/**
+ * プロジェクトのウィンドウを前面化する（タイルクリック・通知クリック共通。260916_5）。
+ * タイトル一致で見つからず、Cursor 自身の windowsState がそのフォルダを「開いている」と記録していれば
+ * （Agents 表示の窓はタイトルが「Cursor Agents」固定でフォルダ名を含まない）、`Cursor.exe <folder>` を
+ * --new-window 無しで起動して Cursor に既存ウィンドウの前面化を任せる
+ */
+async function focusProject(project: Project): Promise<FocusOutcome> {
+  const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
+  if (outcome.ok || project.clickTarget !== "cursor") return outcome;
+  const open = findCursorOpenWindow(project.path, readCursorOpenWindows(), project.workspacePath);
+  if (open === undefined) return outcome;
+  const launched = await launchProjectApp("cursor", project.path, project.workspacePath, { newWindow: false });
+  if (!launched.ok) return { ok: false, message: `${outcome.message ?? "ウィンドウが見つかりません"} / Cursor 経由の前面化も失敗: ${launched.message ?? ""}` };
+  return { ok: true, message: `Cursor に既存ウィンドウの前面化を依頼${open.glassMode ? "（Agents 表示）" : ""}` };
+}
+
 function showSessionToast(project: Project | null, title: string, body: string): void {
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body, silent: true });
@@ -553,9 +570,10 @@ function showSessionToast(project: Project | null, title: string, body: string):
       focusOwnWindow();
       return;
     }
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
-    logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
-    if (!outcome.ok) focusOwnWindow();
+    void focusProject(project).then((outcome) => {
+      logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
+      if (!outcome.ok) focusOwnWindow();
+    });
   });
   n.show();
 }
@@ -765,7 +783,7 @@ function sweepLiveness(): void {
     const project = projectStore.getProject(projectId);
     if (project === null || !windowApiAvailable()) return null; // 判定不能 → liveness-monitor 側で安全側に扱う
     if (windows === null) windows = listTopLevelWindows();
-    return hasWindowFor(project.clickTarget, path.basename(project.path), windows, project.workspacePath);
+    return projectWindowPresent(project, windows, readCursorOpenWindows());
   };
   // 無更新の判定は subagent 記録も含めた最終活動時刻で行い、登録簿が busy の間は切断しない（260907_1 R4）
   const hits = findDisconnected(rest, {
@@ -798,7 +816,7 @@ function pollWindowPresence(): void {
   let next: WindowPresence = {};
   if (windowApiAvailable() && projectStore.projects.length > 0) {
     try {
-      next = computeWindowPresence(projectStore.projects, listTopLevelWindows());
+      next = computeWindowPresence(projectStore.projects, listTopLevelWindows(), readCursorOpenWindows());
     } catch (e) {
       logger.warn(`ウィンドウ有無の判定に失敗（前回値を維持）: ${String(e)}`);
       return;
@@ -1453,11 +1471,11 @@ function wireIpc(): void {
     broadcast();
   });
 
-  ipcMain.handle("focus-project", (_e, id: string) => {
+  ipcMain.handle("focus-project", async (_e, id: string) => {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
     // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), project.workspacePath);
+    const outcome = await focusProject(project);
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     return outcome;

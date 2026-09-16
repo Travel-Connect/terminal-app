@@ -76,6 +76,38 @@ describe("computeWindowPresence（260903_1）", () => {
     const project = { ...proj("p1", "C:/dev/api", "terminal"), workspacePath: "C:/workspaces/Team.code-workspace" };
     expect(computeWindowPresence([project], [{ title: "Team", exe: "WindowsTerminal.exe" }])).toEqual({ p1: false });
   });
+
+  it("Cursor のタイトルは末尾「Cursor」直前のセグメント完全一致（260916_5）: 短い名前が他プロジェクトの窓に部分一致しない", () => {
+    const dev = proj("dev", "C:/dev");
+    const others = [
+      { title: "dev-server.ts - webdashboard-app - Cursor", exe: "cursor.exe" },
+      { title: "device.md - Pricefluctuation-app - Cursor", exe: "cursor.exe" },
+      { title: "Cursor Agents", exe: "cursor.exe" }, // Agents 表示の固定タイトル（フォルダ名なし）
+      { title: "Settings - Cursor", exe: "cursor.exe" },
+    ];
+    expect(computeWindowPresence([dev], others)).toEqual({ dev: false });
+    expect(computeWindowPresence([dev], [{ title: "dev - Cursor", exe: "cursor.exe" }])).toEqual({ dev: true });
+    expect(computeWindowPresence([dev], [{ title: "● CLAUDE.md - dev - Cursor", exe: "cursor.exe" }])).toEqual({ dev: true });
+    expect(computeWindowPresence([dev], [{ title: "notes - draft.md - dev - Cursor", exe: "cursor.exe" }])).toEqual({ dev: true });
+  });
+
+  it("フォルダ名に \" - \" を含んでも末尾一致で検出する", () => {
+    const p = proj("p1", "C:/work/OneDrive - Company/proj - 2026");
+    expect(computeWindowPresence([p], [{ title: "a.md - proj - 2026 - Cursor", exe: "cursor.exe" }])).toEqual({ p1: true });
+    expect(computeWindowPresence([p], [{ title: "a.md - 2026 - Cursor", exe: "cursor.exe" }])).toEqual({ p1: false });
+  });
+
+  it("タイトルで見つからなくても、Cursor の windowsState がそのフォルダを開いていれば接続扱い（Agents 表示の窓。260916_5）", () => {
+    const p = proj("p1", "C:/dev/sunrest-rankget-script");
+    const agents = [{ title: "Cursor Agents", exe: "cursor.exe" }];
+    const open = [{ folder: "c:\\dev\\sunrest-rankget-script", glassMode: true }];
+    expect(computeWindowPresence([p], agents)).toEqual({ p1: false });
+    expect(computeWindowPresence([p], agents, open)).toEqual({ p1: true });
+    // cursor.exe の窓が 1 つも無ければ windowsState（永続スナップショット）は信じない
+    expect(computeWindowPresence([p], [{ title: "PowerShell", exe: "windowsterminal.exe" }], open)).toEqual({ p1: false });
+    // ターミナル対象には使わない
+    expect(computeWindowPresence([proj("p2", "C:/dev/sunrest-rankget-script", "terminal")], agents, open)).toEqual({ p2: false });
+  });
 });
 
 describe("presenceEquals / presenceDiff（260903_1）", () => {

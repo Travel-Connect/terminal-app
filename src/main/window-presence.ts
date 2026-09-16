@@ -12,6 +12,7 @@
  */
 import * as path from "path";
 import type { Project } from "../shared/types";
+import { findCursorOpenWindow, type CursorOpenWindow } from "./cursor-state";
 import { hasWindowFor, type TopLevelWindow } from "./window-control";
 
 /** 検証用の env 上書き（liveness-monitor と同系の検証フラグ。実運用では未設定 = 既定値） */
@@ -26,11 +27,27 @@ export const WINDOW_POLL_INTERVAL_MS = envMs("TERMINAL_APP_WINDOW_POLL_MS", 5_00
 /** key = projectId、value = 対象アプリのウィンドウが見つかったか */
 export type WindowPresence = Record<string, boolean>;
 
+/**
+ * 1 プロジェクトのウィンドウ有無（260916_5）: タイトル一致（hasWindowFor）に加え、Cursor 対象なら
+ * Cursor 自身の windowsState（開いているフォルダ）でも判定する — Agents 表示の窓はタイトルにフォルダ名が無いため
+ */
+export function projectWindowPresent(project: Project, windows: readonly TopLevelWindow[], cursorOpen: readonly CursorOpenWindow[] = []): boolean {
+  if (hasWindowFor(project.clickTarget, path.basename(project.path), windows, project.workspacePath)) return true;
+  if (project.clickTarget !== "cursor" || cursorOpen.length === 0) return false;
+  // windowsState は永続スナップショットなので、cursor.exe の可視窓が 1 つも無ければ信じない（終了直後の古い記録）
+  const anyCursorWindow = windows.some((w) => path.win32.basename(w.exe).toLowerCase() === "cursor.exe");
+  return anyCursorWindow && findCursorOpenWindow(project.path, cursorOpen, project.workspacePath) !== undefined;
+}
+
 /** 登録済み全プロジェクトのウィンドウ有無を一括判定する（列挙結果は 1 回分を使い回す） */
-export function computeWindowPresence(projects: readonly Project[], windows: readonly TopLevelWindow[]): WindowPresence {
+export function computeWindowPresence(
+  projects: readonly Project[],
+  windows: readonly TopLevelWindow[],
+  cursorOpen: readonly CursorOpenWindow[] = []
+): WindowPresence {
   const out: WindowPresence = {};
   for (const p of projects) {
-    out[p.id] = hasWindowFor(p.clickTarget, path.basename(p.path), windows, p.workspacePath);
+    out[p.id] = projectWindowPresent(p, windows, cursorOpen);
   }
   return out;
 }
