@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う） — 作業完了ダッシュボード</title>
-<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-07T04:19:34+0900","subject":"terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う）","state":"要確認","score":89,"open_tasks":1,"blockers":0} -->
+<title>terminal-app 260922_2（Jev 4 判定）＋ 260922_1（確認待ちを左上へ）— 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-22T07:31:17+0900","subject":"terminal-app 260922_2（Jev 4 判定）＋ 260922_1（確認待ちを左上へ）","state":"要確認","score":86,"open_tasks":2,"blockers":0} -->
 <style>
   :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
           --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
@@ -69,20 +69,20 @@
 <main>
   <header>
     <h1>作業完了ダッシュボード</h1>
-    <div class="meta">作成日時: 2026-09-07 04:19 / 対象: terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
-      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 6e98c40（バッジ実装。260907_1 は 9855b19。この報告書は別コミット）</div>
+    <div class="meta">作成日時: 2026-09-22 07:31 / 対象: terminal-app 260922_2（Jev 4 判定）＋ 260922_1（確認待ちを左上へ） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 2736e9c（push 済み。origin/main と一致）</div>
   </header>
 
   <section class="card" id="sec-0">
     <h2>0. 3秒サマリー</h2>
     <div class="summary-list">
       <div class="summary-item"><strong>結論</strong>
-        <span class="status warn">要確認</span><p>依頼の 2 件を終えました。(1) ループ進捗バッジ: タイル名の下に「ループ 2/4・codex 実装中 1分・最高 78点」のような青いバッジが出ます（実装・テスト・実画面確認・稼働アプリ反映まで完了）。(2) push: GitHub へ送信済み（origin/main を最新に更新）。実際のループでの見え方だけ、次回のループで確認してください。</p></div>
+        <span class="status warn">要確認</span><p>Jev（判断だけ返すAI）を使う4つの改善をすべて実装し、実際のAPI（システム同士をつなぐ窓口）に14件を投げて全件が期待どおりの判定になりました。260922_1（確認待ちを左上へ）と合わせて2件をコミット＋push 済み。起動中のアプリは古いままなので再起動が必要です。</p></div>
       <div class="summary-item"><strong>あなたの対応</strong>
-        <span class="status warn">後でよい</span>
-        <p>次にループを回したとき、タイルに進捗バッジが出て「完了」「切断」のまま止まらないかを見る（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
+        <span class="status warn">必要</span>
+        <p>アプリを再起動し、実際のセッションで「返答待ち」や赤い印が出るかを数日使って確かめてください（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
       <div class="summary-item"><strong>作業を止めている問題（ブロッカー）</strong>
-        <span class="status ok">該当なし</span><p>作業を止める問題はありません。</p></div>
+        <span class="status ok">該当なし</span><p>テスト514件・型チェック・Lint・ビルド・デモ画面・実API疎通のすべてが成功。</p></div>
     </div>
   </section>
 
@@ -92,16 +92,16 @@
       <div class="card span-3"><h3>完了状態</h3>
         <p><span class="status warn">要確認</span></p></div>
       <div class="card span-3"><h3>報告の確かさ</h3>
-        <p><span class="status warn">中</span></p><p class="muted">自動テスト 462 件、実画面の動作確認 13 項目（バッジ）＋ 24 項目（実行中維持）＋回帰 8 項目はすべて成功。ただし本物の品質ループでの表示はまだ観測していません（再起動直後のため）。</p></div>
+        <p><span class="status ok">高</span></p><p class="muted">自動テスト・実APIへの疎通・デモ画面まで自分で実行して確認。実際の Claude Code セッションで hook 経由に判定が走る様子だけは未確認（再起動後に確認できる）</p></div>
       <div class="card span-3"><h3>自己採点</h3>
-        <div class="score">89<small>/100</small></div></div>
+        <div class="score">86<small>/100</small></div></div>
       <div class="card span-3"><h3>情報の新しさ</h3>
-        <p>2026-09-07 04:19 作成。稼働中の terminal-app は 04:18:58 にバッジ入りの版で再起動済み（プロセス番号 33812）。GitHub への送信は 04:15 頃（260907_1 まで）と本報告の直前（バッジ分）。</p></div>
+        <p>2026-09-22 07:31 作成。テスト・ビルド・実API疎通は 07:27〜07:30</p></div>
       <div class="card span-12"><h3>画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
-        <p><span class="status ok">対象外（画面の変更なし）</span>
-           このアプリは Web アプリではなく Windows の常駐アプリ（Electron）です。画面はすでに稼働中のアプリで確認できます（タイルに青いバッジが出ます）。</p>
-        <p>確認する画面: 今回は Web の画面確認サーバーの対象外のため起動していません（稼働中の terminal-app のタイルを見てください）</p>
-        </div>
+        <p><span class="status info">対象外（画面の変更なし）</span>
+           このアプリはブラウザで開く Web アプリではなくデスクトップアプリ（Electron）のため、確認用サーバーは起動していません。</p>
+        <p>確認する画面: 今回は画面の変更がないため起動していません（代わりにデモ画面のスクリーンショットを「11. 検証・実施ログ」に載せています）</p>
+      </div>
     </div>
   </section>
 
@@ -113,13 +113,14 @@
     <div class="table-wrap"><table>
       <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / 返信）</th></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
-        <td><span class="status info">後でよい・コピペ</span></td>
-        <td>次に品質ループや codex を動かしたあと、タイルに進捗バッジが出たか・「実行中へ戻した」記録があるかを確認する。バッジが出ない／タイルが「完了」「切断」のまま止まる場合は、その時刻をチャットで教えてください</td>
-        <td>コマンドプロンプト（黒い画面）で実行すると、該当行だけが出ます:<br><code class="copy">findstr /C:"ループ進捗バッジ" /C:"実行中へ復帰" "%APPDATA%\terminal-app\logs\app.log"</code></td></tr>
+        <td><span class="status bad">今すぐ・目で確認</span></td>
+        <td>アプリを再起動し、実際のセッションで「返答待ち」「赤い印」「作業テキストが残る」を数日使って確かめる</td><td>terminal-app のタイトルバー右の「↻（再起動）」を押す。もしくは <code class="copy">C:\Users\hppym\dev\terminal-app\start-app.bat</code>。起動ログに「Jev 判定: 有効」と出れば動いています</td></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
+        <td><span class="status info">後でよい・コピペ</span></td>
+        <td>判定の記録を見て、誤判定（返答待ちなのに完了、危険でないのに赤い印 など）が無いか確認する</td><td>記録ファイルを開く: <code class="copy">%APPDATA%\terminal-app\logs\app.log</code>（「Jev 返答待ち判定」「Jev 危険度判定」「Jev 作業テキスト判定」「Jev 停滞判定」の行）</td></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>3</td>
         <td><span class="status warn">返信で選ぶ</span></td>
-        <td>バッジの文言が長いときの見せ方を決める（今はタイル幅で「…」省略し、マウスを乗せると全文が出る）</td>
-        <td><strong>A</strong> = このまま（推奨。情報量を保つ） / <strong>B</strong> = 点数を省いて短くする（例「ループ 2/4・実装中」）</td></tr>
+        <td>顧客データを扱うプロジェクトで Jev を止める仕組みが必要か決める（今は全プロジェクトで有効。止めるなら環境変数 TERMINAL_APP_JEV=off で全体を止めるだけ）</td><td><strong>A</strong> = 今のまま（全体オン。必要なら env で全体オフ） / <strong>B</strong> = プロジェクトごとのオン・オフを設定画面に追加する</td></tr>
     </table></div>
   </section>
 
@@ -127,20 +128,20 @@
     <h2>3. 今回の差分</h2>
     <div class="table-wrap"><table>
       <tr><th>区分</th><th>内容</th></tr>
-      <tr><td>前回からの推移</td><td>状態: 要確認→要確認 / 自己採点: 88→89 / 残タスク: 2件→1件</td></tr>
-      <tr><td>新しく完了</td><td>ループ進捗バッジ（260907_2。実装コミット 6e98c40）。GitHub への送信（前回まで未送信だった 11 コミットを含めて origin/main を更新）。稼働アプリをバッジ入りの版で再起動</td></tr>
-      <tr><td>新しく発生した懸念</td><td>バッジの文言がタイル幅を超えると「…」で省略される（マウスを乗せると全文）。eval-loop の状態ファイルの形式が将来変わると読めなくなる（バッジが出なくなるだけで、他の表示は壊れない）</td></tr>
-      <tr><td>解消済み</td><td>前回の確認事項「案 C（バッジ）を追加するか」は「追加する」で決定・実装済み</td></tr>
-      <tr><td>未変化</td><td>前回の確認事項「完了通知の遅れ 3.5 秒のままでよいか」は未回答（このまま）。前回 260906_1 の手動確認枠は今回も触れていない</td></tr>
+      <tr><td>前回からの推移</td><td>状態: 要確認→要確認 / 自己採点: 88→86 / 残タスク: 2件→2件（前回 07:06 の報告「260922_1 ＋ Jev 活用案」との比較）</td></tr>
+      <tr><td>新しく完了</td><td>Jev 4 判定の実装・テスト44件・実API疎通14件・ドキュメント。260922_1 と 260922_2 のコミット＋push（2fc81c4 / 2736e9c）</td></tr>
+      <tr><td>新しく発生した懸念</td><td>Jev の判定は精度の独立検証が無い（「8. 懸念事項」）。会話の抜粋が米国の外部サービスへ送られる</td></tr>
+      <tr><td>解消済み</td><td>前回の確認事項「コミットの可否」「Jev 案の採否」は返信どおり実施。spec の ID 重複（REQ-17/AC-21 を二重に使っていた）を REQ-19/AC-23 に振り直して修正</td></tr>
+      <tr><td>未変化</td><td>実稼働アプリでの目視確認は再起動待ちのまま</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-4">
     <h2>4. 現状サマリー</h2>
     <div class="table-wrap"><table>
-      <tr><th>目的</th><td>(260907_1) 品質ループや codex が作業中なのにタイルが「完了」「切断」のまま止まる問題を直す。(260907_2) その上で、タイルにループの進み具合（何周目・どの段階・最高点）を出す</td></tr>
-      <tr><th>今回できたこと</th><td>バッジの情報源を eval-loop の状態ファイル（registry → state.json）と codex ジョブの生存記録（heartbeat）に固定し、15 秒ごとの見直しで更新。fork ループ（agents 登録）も対応。終了後は 30 分だけ結果（合格 92 点 など）を表示。新規テスト 19 件・実画面確認 13 項目・回帰 8 項目・稼働アプリ再起動・GitHub へ送信</td></tr>
-      <tr><th>まだ残っていること</th><td>本物のループでバッジと「実行中」維持を観測して確かめる（時間依存。次のループで分かる）</td></tr>
+      <tr><th>目的</th><td>前回の返信「コミット＋push」「Jev 案1に着手」「データ送信は全プロジェクトで有効」「全部実装して」に従い、Jev を使う4つの改善をアプリに組み込む</td></tr>
+      <tr><th>今回できたこと</th><td>(1) 返答待ち: Claude が質問して止まった「完了」を「返答待ち」（青の点滅・左上・トースト）にする (2) 確認待ちの危険度: 取り消せない／外部へ送る／広範囲の操作に赤い印 (3) 作業テキストの上書き防止: 「はい」「A」「続けて」では前の依頼文を残す (4) 停滞の疑い: 同じ失敗の繰り返し・進展なしに赤い印。キー無し・API失敗・env オフでは従来どおり動く。実API に14件投げて全件が期待どおり（応答 200〜650ms）</td></tr>
+      <tr><th>まだ残っていること</th><td>実際のセッションでの確認（再起動後、数日使って誤判定を見る）。プロジェクトごとのオン・オフは未実装（全体オンのみ）</td></tr>
       <tr><th>作業を止めている問題</th><td>該当なし</td></tr>
     </table></div>
   </section>
@@ -149,12 +150,17 @@
     <h2>5. プラン進捗（計画の進み具合）</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
-      <tr><td>260907_1 Task 1〜6, 8: 実行中維持の判定・配線・E2E・文書</td><td><span class="status ok">完了</span></td><td>コミット 9855b19 / <code>docs/evidence/20260907-loop-running/</code>（24 項目 OK）</td></tr>
-      <tr><td>260907_1 Task 7: 稼働アプリ反映と実環境確認</td><td><span class="status warn">一部完了</span></td><td>反映済み。実ループでの「戻した」記録は未観測（次のループで確認）</td></tr>
-      <tr><td>Task 9: eval-loop の状態を読む部品（純関数＋ファイル読取）</td><td><span class="status ok">完了</span></td><td><code>src/main/eval-loop-status.ts</code> / <code>tests/eval-loop-status.test.ts</code>（16 件）</td></tr>
-      <tr><td>Task 10: 状態ストアにバッジ文言を載せる</td><td><span class="status ok">完了</span></td><td><code>src/main/state-store.ts</code>（applyLoopText）/ <code>tests/state-store-loop-text.test.ts</code>（3 件）/ <code>src/shared/types.d.ts</code></td></tr>
-      <tr><td>Task 11: 配線と描画（15 秒の見直し・青いピル・両方無ければ行ごと非表示）</td><td><span class="status ok">完了</span></td><td><code>src/main/index.ts</code> / <code>src/renderer/renderer.ts</code> / <code>styles.css</code></td></tr>
-      <tr><td>Task 12: 実画面確認・文書・報告・コミット・push</td><td><span class="status ok">完了</span></td><td><code>scripts/verify-loop-badge-e2e.mjs</code> → <code>docs/evidence/20260907-loop-badge/</code>（13 項目 OK）、spec REQ-18/AC-22、design 5.2/6.2、verification V-23、README、コミット 6e98c40、push 済み</td></tr>
+      <tr><td>260922_1 のコミット＋push</td><td><span class="status ok">完了</span></td><td>2fc81c4（origin/main と一致）</td></tr>
+      <tr><td>Jev API クライアント（キー取得・失敗時は判定なし・タイムアウト）</td><td><span class="status ok">完了</span></td><td>src/main/jev-client.ts、tests/jev-client.test.ts（10件）</td></tr>
+      <tr><td>4 判定の質問文・閾値・解釈（純関数）</td><td><span class="status ok">完了</span></td><td>src/main/jev-judge.ts、tests/jev-judge.test.ts（16件）</td></tr>
+      <tr><td>transcript からの材料抽出（最後の返答・ツール呼び出し・直近の手順）</td><td><span class="status ok">完了</span></td><td>src/main/session-scan.ts、tests/session-scan-jev.test.ts（8件）。実 transcript の形を確認して実装</td></tr>
+      <tr><td>状態管理（返答待ち・印の付与・遷移時の整理・作業テキストの後追い確定）</td><td><span class="status ok">完了</span></td><td>src/main/state-store.ts、src/shared/types.d.ts、tests/state-store-jev.test.ts（8件）</td></tr>
+      <tr><td>main プロセスへの配線（Stop 後・Notification 後・短い prompt・15秒掃引）</td><td><span class="status ok">完了</span></td><td>src/main/index.ts（judgePendingQuestion / judgeDanger / judgeWorkText / judgeStalls）</td></tr>
+      <tr><td>画面（「返答待ち」ラベル・赤い印）とデモ</td><td><span class="status ok">完了</span></td><td>src/renderer/renderer.ts・format.ts・styles.css、src/main/demo.ts、tests/format-jev.test.ts（2件）、デモ画面の証跡</td></tr>
+      <tr><td>実 API の疎通確認</td><td><span class="status ok">完了</span></td><td>scripts/probe-jev.mjs → docs/evidence/20260922-jev/probe-result.json（14件全件が期待どおり）</td></tr>
+      <tr><td>ドキュメント</td><td><span class="status ok">完了</span></td><td>README（機能説明・注意・probe の使い方）、spec（REQ-19/20・AC-23/24）、design（Jev 判定の行）</td></tr>
+      <tr><td>Jev のコミット＋push</td><td><span class="status ok">完了</span></td><td>2736e9c（origin/main と一致）</td></tr>
+      <tr><td>実稼働セッションでの確認</td><td><span class="status warn">未着手</span></td><td>再起動が必要。hook → Jev → タイルの経路は実セッションでしか通らない</td></tr>
     </table></div>
   </section>
 
@@ -163,7 +169,9 @@
     <div class="table-wrap"><table>
       <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
       <tr><td>あなた（ユーザー）の判断待ち</td>
-        <td class="priority-mid">中</td><td>次のループでバッジ表示と「実行中」維持を実地で確認する</td><td>再起動直後で本物のループのイベントがまだ届いていない。擬似データでの確認は完了</td><td>「2. あなたの次のアクション」の 1</td></tr>
+        <td class="priority-high">高</td><td>再起動して実セッションで数日使い、誤判定の有無を app.log で確認する</td><td>実 API の疎通は代表例14件だけ。実際の日本語の会話で閾値が合うかは使って見るしかない</td><td>「2. あなたの次のアクション」1〜2</td></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td>
+        <td class="priority-mid">中</td><td>プロジェクトごとのオン・オフを追加するか決める</td><td>今は全体オンのみ。顧客データを含むプロジェクトだけ止めたい場合に必要</td><td>「2. あなたの次のアクション」3 に返信</td></tr>
     </table></div>
   </section>
 
@@ -171,12 +179,12 @@
     <h2>7. 自己採点</h2>
     <div class="table-wrap"><table>
       <tr><th>観点</th><th>配点</th><th>得点</th><th>根拠</th></tr>
-      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>28</td><td>「ループ進捗バッジを追加して」「push して」の両方を完了。バッジは提案どおり周回・段階・最高点・codex ジョブ・終了結果まで対応。実ループでの実観測が残る</td></tr>
-      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>状態ファイルの読取を純関数に分離し、壊れたファイルは例外にせず無視。既存テスト無改変で 462 件成功。手動バッジの位置も回帰なし（260904_1 の E2E 8 項目 OK）</td></tr>
-      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>17</td><td>テストを先に書いて失敗を確認してから実装（TDD）。実画面確認 13 項目と画像の目視。稼働アプリ再起動。本物のループでの表示は未観測</td></tr>
-      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>eval-loop の状態ファイルは同じ作者のハーネスだが仕様書はなく、形式変更で読めなくなる可能性を設計書に明記。走査上限（200 件）で暴走を防止</td></tr>
-      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>情報源・表示規則・限界を README と設計書に記録。用語には説明を添えた</td></tr>
-      <tr><th>総合</th><th>100</th><th>89</th><th>実装・検証・反映・送信は完了。実ループでの確認が残るため「要確認」</th></tr>
+      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>27</td><td>コミット＋push・4 判定の実装・全プロジェクト有効、のすべてに対応。案1を「画面に反映する形」で実装したが、返信で A/B/C の指定が無かったため自分で決めた点で 3 点減</td></tr>
+      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>判定は追加層で、失敗時は従来どおり動く設計。質問は小さく分けてコードで合成（公式指針どおり）。判定は全件ログに残る。閾値は環境変数でモデル固定できるが数値の外部設定は無い</td></tr>
+      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>15</td><td>自動テスト514件・型・Lint・ビルド・デモ画面・実API 14件。ただし hook から Jev までの実経路（実セッション）は未確認</td></tr>
+      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>12</td><td>その後イベントが来ていたら返答待ちにしない、状態が変われば印を落とす、同じ材料で聞き直さない、など誤動作の抑えを実装。外部送信・精度未検証は明記。プロジェクト単位の停止は未実装</td></tr>
+      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>14</td><td>4 判定それぞれの動き・閾値・証跡を README / spec / design と本報告にそろえた</td></tr>
+      <tr><th>総合</th><th>100</th><th>86</th><th>実装・自動検証は十分。実セッションでの確認と、プロジェクト単位の停止の要否が残るため「要確認」</th></tr>
     </table></div>
   </section>
 
@@ -184,10 +192,10 @@
     <h2>8. 懸念事項</h2>
     <div class="table-wrap"><table>
       <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
-      <tr><td class="priority-mid">中</td><td>Claude Code の登録簿（<code>~/.claude/sessions</code>）は公開仕様ではない（260907_1 の判定の根拠）</td><td>Claude Code の更新で形式が変わると busy による判定が効かなくなる（従来の記録ファイル判定に戻るだけで壊れはしない）</td><td>更新後にログで「登録簿 status=busy」の復帰が出るか確認する</td></tr>
-      <tr><td class="priority-mid">中</td><td>Stop 時の後処理（hook）全体が 3.5 秒以上かかると一時的に「実行中」へ戻る</td><td>「完了」の表示が最大 25 秒ほど遅れ、そのときの完了通知は出ない</td><td>頻発するなら猶予（設定値 TERMINAL_APP_STOPPED_RESUME_MIN_AGE_MS）を延ばす</td></tr>
-      <tr><td class="priority-low">低</td><td>バッジの文言（最長で「ループ 2/4・codex 実装中 12分・最高 78点」）がタイル幅を超える</td><td>末尾が「…」で省略される（マウスを乗せると全文が出る）</td><td>気になれば点数を省く短い形式に変更できる（確認事項 2）</td></tr>
-      <tr><td class="priority-low">低</td><td>eval-loop の状態ファイル（state.json）の形式が将来変わる</td><td>バッジが出なくなる（他の表示・判定には影響しない）</td><td>eval-loop 側を変えたときは <code>tests/eval-loop-status.test.ts</code> の実測サンプルを更新する</td></tr>
+      <tr><td class="priority-mid">中</td><td>会話の抜粋（最後の返答・許可待ちのツール呼び出し・直近の手順）が米国の TypeSafe 社の API へ送られる。データを学習に使わないとされるが、削除保証（ZDR）は企業契約のみ</td><td>顧客情報を含むプロジェクトでは情報が外部に出る</td><td>環境変数 TERMINAL_APP_JEV=off で全体を止められる。必要ならプロジェクトごとのオン・オフを追加（「2」の 3）</td></tr>
+      <tr><td class="priority-mid">中</td><td>Jev の精度は独立した検証がまだ無く、日本語は公式が「英語と同等ではない」と明記</td><td>返答待ちの取りこぼし・危険の印の誤検知が起こりうる</td><td>閾値は高め（返答待ち 0.7・停滞 0.75）に設定。判定は全件 app.log に残るので、使いながら閾値を調整し、決まったら env TERMINAL_APP_JEV_MODEL でモデル版を固定する</td></tr>
+      <tr><td class="priority-low">低</td><td>停滞判定は 15 秒ごとの掃引で実行中セッションごとに最大 1 分に 1 回 API を呼ぶ（入力のみ課金・1 回 約 0.01 円未満）</td><td>10 セッション並行でも 1 時間 数円程度</td><td>transcript が動いていなければ呼ばない仕組みを実装済み。気になれば間隔（STALL_MIN_INTERVAL_MS）を延ばす</td></tr>
+      <tr><td class="priority-low">低</td><td>返答待ちの判定は Stop の約 3.5 秒後に走るため、その間は一瞬「完了」と表示される</td><td>完了→返答待ちに変わる動きが見える</td><td>既存の「block された Stop の前倒し判定」と同じ待ち時間に合わせた設計。実害があれば即時判定に変えられる</td></tr>
     </table></div>
   </section>
 
@@ -196,42 +204,45 @@
     <p class="muted">記号だけ返信すれば伝わります（例: 「1-A 2-B」）。全部おまかせなら「全部A」でも大丈夫です。</p>
     <div class="table-wrap"><table>
       <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
-      <tr><td>1</td><td class="priority-low">低</td><td>バッジの文言が長いときの見せ方</td>
-        <td><strong>A</strong> = このまま（「…」省略＋マウスで全文。情報量を保つ）（推奨） / <strong>B</strong> = 点数を省いて短くする（常に全文が見えるが最高点は消える）</td></tr>
-      <tr><td>2</td><td class="priority-low">低</td><td>完了通知の遅れは 3.5 秒のままでよいか（前回からの持ち越し）</td>
-        <td><strong>A</strong> = このまま（誤通知を確実に防げる）（推奨） / <strong>B</strong> = 短くする（誤通知の可能性がわずかに増える）</td></tr>
+      <tr><td>1</td><td class="priority-mid">中</td><td>プロジェクトごとの Jev オン・オフを設定画面に追加するか</td>
+        <td><strong>A</strong> = 今のまま（全体オンのみ。必要なら env で全体オフ）（推奨） / <strong>B</strong> = 設定画面に各プロジェクトのチェックを追加する</td></tr>
+      <tr><td>2</td><td class="priority-low">低</td><td>返答待ちの判定を「Stop の約 3.5 秒後」のままにするか、即時にするか</td>
+        <td><strong>A</strong> = 今のまま（block された Stop の判定と同じ待ち。誤通知が少ない）（推奨） / <strong>B</strong> = 即時に判定する（一瞬の「完了」表示が消える）</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-10">
     <h2>10. 対象外・未対応（今回やっていないこと）</h2>
-    <ul><li>eval-loop 側（hook・スクリプト・state.json の形式）は変更していない（terminal-app が読むだけ）</li>
-      <li>バッジからループを操作する機能（停止・再開など）は無い。表示のみ</li>
-      <li>登録簿の idle / waiting を「完了」「確認待ち」の根拠にすること（260907_1 の対象外のまま）</li>
-      <li>前回 260906_1 の手動確認枠（整列ボタン・ドラッグ並べ替えの実機確認）</li>
-      <li>本物のループでのバッジ表示の観測（再起動直後のため未観測。次のループで分かる）</li></ul>
+    <ul>
+      <li>プロジェクトごとの Jev オン・オフ（返信 3-B「全プロジェクトで有効」に従い、全体の env スイッチのみ）</li>
+      <li>閾値の設定画面（コード内の定数。モデル版だけ env TERMINAL_APP_JEV_MODEL で固定可能）</li>
+      <li>実稼働アプリの再起動と実セッションでの確認（あなたの操作に委ねた）</li>
+      <li>返答待ちを Notification（権限確認）と別の色にすること（ラベルだけ「返答待ち」。色・点滅・左上配置は確認待ちと同じ）</li>
+      <li>Jev の理由説明の表示（Jev は理由を返さないため不可。確率は app.log に残る）</li>
+    </ul>
   </section>
 
   <section class="card" id="sec-11">
     <h2>11. 検証・実施ログ</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>結果</th><th>内容</th></tr>
-      <tr><td>変更ファイル</td><td><span class="status info">今回 17件＋証跡 4件</span></td><td>本体 6（<code>src/main/</code> の eval-loop-status〔新規〕/ index / state-store、<code>src/renderer/</code> の renderer / styles、<code>src/shared/types.d.ts</code>）、新規テスト 2、E2E スクリプト 1、docs 5、README、plan。証跡は <code>docs/evidence/20260907-loop-badge/</code></td></tr>
-      <tr><td>動作テスト</td><td><span class="status ok">成功</span></td><td><code>npm test</code>（自動テスト一式）= 52 ファイル / 462 件すべて成功。新規 19 件は実装前に失敗を確認してから実装。E2E（実際の画面での動作確認）13 項目 OK、260904_1 の回帰 E2E 8 項目 OK</td></tr>
-      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を Electron が実行できる形に変換）exit 0。稼働アプリを止めて新しい版で再起動（04:18:58）</td></tr>
-      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>（型の整合性）と <code>npm run lint</code>（書き方の規約）ともに exit 0</td></tr>
-      <tr><td>GitHub への送信（push）</td><td><span class="status ok">成功</span></td><td><code>git push origin main</code> を 2 回（260907_1 まで 11 コミット → a35b15c..b596766、バッジ実装 6e98c40）。この報告書のコミットは送信後にチャットで報告</td></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">21件</span></td><td>新規: src/main/jev-client.ts、src/main/jev-judge.ts、scripts/probe-jev.mjs、tests 5 本。変更: index.ts、state-store.ts、session-scan.ts、demo.ts、types.d.ts、renderer.ts、format.ts、styles.css、README、spec、design</td></tr>
+      <tr><td>動作テスト（自動テスト）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>（プログラムの自動テスト）→ 58ファイル・514件すべて成功（今回 44件追加）</td></tr>
+      <tr><td>実 API への疎通（Jev）</td><td><span class="status ok">成功</span></td><td><code>node scripts/probe-jev.mjs</code> → 14件全件が期待どおり。例: 日本語の質問で終わる返答 asks_user=0.96 / 完了報告 0.32 / 許可依頼 wants_permission=0.97 / rm -rf → 取り消せない操作 0.98 / Read → 0.01 / 「はい」→ 作業指示ではない 0.04 / 「在庫の発注点を再計算して」0.97 / 同じテスト4回失敗 → 繰り返し 0.98 / 順調 → 進展 0.79。応答 197〜650ms</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code> → dist/ を更新（再起動すれば新しい動きになる）</td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>・<code>npm run lint</code> とも指摘なし</td></tr>
+      <tr><td>デモ画面での目視確認</td><td><span class="status ok">成功</span></td><td><code>npx electron . --demo --demo-count=16 --capture=...</code> → 赤い印（メルマガ作成-app）・「返答待ち」（受注管理-app）・停滞の印（発注最適化-app）が表示され、確認待ち3件が左上に並んだ</td></tr>
+      <tr><td>コミット＋push</td><td><span class="status ok">成功</span></td><td>2fc81c4（260922_1）・2736e9c（260922_2）。<code>git status -sb</code> で origin/main と一致を確認</td></tr>
+      <tr><td>実稼働セッションでの確認</td><td><span class="status warn">未実施</span></td><td>起動中のアプリは古いビルドのため未確認。再起動後、実際の Stop / Notification で判定が走る</td></tr>
     </table></div>
     <details><summary>詳細ログ・スクリーンショット</summary>
-      <p>バッジの E2E 画像（クリックで開く。画像は埋め込んでいません）:</p>
-      <ul>
-        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/01-badges.png">01-badges.png</a> — 3 タイル: 「ループ 2/4・codex 実装中 …」（sessions 登録）／「ループ 1/4・採点中」（fork ループ）／バッジ無し<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-badge\01-badges.png</code></li>
-        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/02-ended.png">02-ended.png</a> — 終了後の「ループ終了・合格 92点」と、31 分前に終わった fork ループのバッジ消滅<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-badge\02-ended.png</code></li>
-        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/app.log">app.log</a>（E2E 中のアプリのログ。「ループ進捗バッジ 表示／消滅」の行）／ <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/result.json">result.json</a></li>
-      </ul>
-      <p>260907_1（実行中維持）の証跡は <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/">docs/evidence/20260907-loop-running/</a>（画像 4 枚・app.log・result.json）。</p>
-      <p>E2E の要点: state.json は eval-loop v3 の実測形式（active / iteration / max_iterations / phase / best_score / ended_reason / ended_at / session_id / agent_id / jobs_dir）。codex ジョブは <code>jobs/iter-001-generator/</code> に started_at（65 秒前）と heartbeat（今）を置いて「走行中」を再現し、heartbeat を 60 秒前にすると段階表示（実装中）に戻ることを確認。</p>
-      <p>稼働アプリの再起動: 19:18:58Z「terminal-app 起動」（<code>%APPDATA%\terminal-app\logs\app.log</code>）。再起動でセッション表示は一度「待機」に戻るため、実ループのバッジは次の hook イベント以降に載る。</p>
+      <p>デモ画面（16タイル。赤い印・返答待ち・停滞の印）:
+        <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260922-jev/01-demo-jev-badges.png">01-demo-jev-badges.png</a><br>
+        C:\Users\hppym\dev\terminal-app\docs\evidence\20260922-jev\01-demo-jev-badges.png</p>
+      <p>実 API 疎通の結果（14件の確率と解釈・応答時間）:
+        <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260922-jev/probe-result.json">probe-result.json</a><br>
+        C:\Users\hppym\dev\terminal-app\docs\evidence\20260922-jev\probe-result.json</p>
+      <p>設計の要点: Jev は「制御層の門番」で、制御の流れ・閾値・副作用はコード側。1 問で大きく聞かず yes/no を 3 問に分けて合成（例: 返答待ち = 質問か／許可依頼か／完了報告か）。判定できないときは何もしない（従来どおり）。判定は全件 app.log に「Jev 〜判定:」で残る。</p>
     </details>
   </section>
 
@@ -242,9 +253,9 @@
     <div class="table-wrap"><table>
       <tr><th>役割</th><th>担当</th><th>モデルID</th><th>備考</th></tr>
       <tr><td>進行管理（全体のとりまとめ）</td><td>メインセッション（この会話のAI）</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
-      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上（サブエージェントは使っていない）</td></tr>
-      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上</td></tr>
-      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上。自動テストと E2E スクリプトの実行結果に基づく</td></tr>
+      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>サブエージェント（別のAI）は使っていない</td></tr>
+      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>Codex への委任なし（直接実装）。判定そのものは実行時に Jev（jev-latest）が行う</td></tr>
+      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>テスト・型・Lint・デモ画面・実API疎通を自分で実行して確認</td></tr>
     </table></div>
   </section>
 
@@ -256,38 +267,38 @@
     <div class="table-wrap"><table>
       <tr><th>用語</th><th>意味</th></tr>
       <tr><td>モデルID</td><td>AIの種類を表す正式な名前。同じ「Claude」でも性能や世代が違うため、この名前でどのAIが作業したかを特定できる</td></tr>
-      <tr><td>品質ループ（eval-loop）</td><td>AI が実装と採点を繰り返し、点数が目標に届くまで自動で直し続ける仕組み</td></tr>
-      <tr><td>バッジ</td><td>タイルの名前の下に出る小さなラベル。手動で付ける灰色のものと、今回追加した青いループ進捗のものがある</td></tr>
-      <tr><td>state.json（状態ファイル）</td><td>品質ループが今何周目・どの段階かを書き出すファイル。バッジの情報源</td></tr>
-      <tr><td>registry（登録簿。eval-loop 側）</td><td>状態ファイルの置き場所を、セッションごとに 1 行で記録した一覧。<code>~/.claude/eval-loop/registry/</code></td></tr>
-      <tr><td>heartbeat</td><td>codex ジョブが「まだ生きている」と 5 秒ごとに更新するファイル。30 秒更新が無ければ止まったとみなす</td></tr>
-      <tr><td>fork ループ</td><td>メインの AI から分かれた別の AI（サブエージェント）で回す品質ループ。agents 側に登録される</td></tr>
-      <tr><td>サブエージェント</td><td>メインの AI から作業を任された別の AI</td></tr>
-      <tr><td>E2Eテスト</td><td>実際の画面操作をなぞる動作確認。今回は本物のアプリを別ポートで起動し、擬似の状態ファイルで再現した</td></tr>
-      <tr><td>push（送信）</td><td>手元の変更の保存記録（コミット）を GitHub に送ること</td></tr>
-      <tr><td>TDD</td><td>先にテストを書いて失敗を確かめてから実装する進め方（テスト駆動開発）</td></tr>
+      <tr><td>Jev（ジェブ）</td><td>TypeSafe AI 社の AI。文章を書かず、yes/no などの判断だけを確率付きで返す。速くて安いが理由は説明しない</td></tr>
+      <tr><td>noul（ノウル）</td><td>Jev の質問の型の一つ。「yes である確率」を 0〜1 で返す</td></tr>
+      <tr><td>閾値（しきいち）</td><td>「この確率以上なら該当」と決める境目の数。高いほど慎重（見逃しが増え、誤検知が減る）</td></tr>
+      <tr><td>hook（フック）</td><td>Claude Code の出来事（開始・終了・確認待ち）をこのアプリへ知らせる仕組み</td></tr>
+      <tr><td>Stop（ストップ）</td><td>Claude Code が1回分の作業を終えたときに出す合図。アプリはこれで「完了」にする</td></tr>
+      <tr><td>transcript（トランスクリプト）</td><td>Claude Code が会話をそのまま記録しているファイル。Jev への判定材料はここから抜粋する</td></tr>
+      <tr><td>掃引（そういき）</td><td>15 秒ごとに全セッションの状態を見直す定期処理</td></tr>
+      <tr><td>環境変数</td><td>動作設定の値。TERMINAL_APP_JEV=off で Jev 判定を止められる</td></tr>
+      <tr><td>API</td><td>システム同士をつなぐ窓口。Jev へはインターネット経由で判定を依頼する</td></tr>
+      <tr><td>Lint / 型チェック</td><td>コードの書き方・整合性の自動チェック</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-14">
     <h2>14. AIが次にできること（あなたの操作は不要）</h2>
     <ol>
-      <li>実際のループで block が起きた場面や、バッジが載った場面のログと記録ファイルを確認し、想定どおりかを裏取りする
+      <li>プロジェクトごとの Jev オン・オフ（設定画面のチェック。既定オン）を追加する
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>実ループのバッジと block 痕跡を確認して</pre>
+          <pre>プロジェクトごとの Jev オン・オフを設定画面に追加して</pre>
         </div>
       </li>
-      <li>バッジの文言を短い形式（点数なし）に変える、または色・位置を調整する
+      <li>数日分の app.log から Jev 判定の一致率（返答待ち・危険度の誤判定）を集計し、閾値の調整案を出す
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>バッジの文言を短くして</pre>
+          <pre>app.log の Jev 判定を集計して閾値の調整案を出して</pre>
         </div>
       </li>
-      <li>完了通知の遅れ（3.5 秒）を短くする
+      <li>返答待ちを Notification の確認待ちと別の色（例: 紫）にして見分けやすくする
         <div class="reply-box">
           <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
-          <pre>完了通知の遅れを短くして</pre>
+          <pre>返答待ちのタイルを確認待ちと別の色にして</pre>
         </div>
       </li>
     </ol>
