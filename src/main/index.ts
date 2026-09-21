@@ -25,6 +25,22 @@ import { extractDropPaths } from "./drop-paths";
 import { evalLoopDir, loopTextForSessions } from "./eval-loop-status";
 import { buildListenErrorText, createEventServer, resolveAttemptedPort, type EventServer } from "./event-server";
 import { ALL_HOOK_EVENTS, mergeHooks, mergeStatusLine, removeHooks, removeStatusLine } from "./hooks-manager";
+import { createJevClient, jevDisabledByEnv, loadTypesafeApiKey, nullJevClient, type JevClient } from "./jev-client";
+import {
+  STALL_MIN_INTERVAL_MS,
+  dangerQuestions,
+  dangerState,
+  interpretDanger,
+  interpretPendingQuestion,
+  interpretStall,
+  interpretWorkText,
+  pendingQuestionQuestions,
+  pendingQuestionState,
+  shouldJudgeWorkText,
+  stallQuestions,
+  stallState,
+  workTextQuestions,
+} from "./jev-judge";
 import {
   DISCONNECT_CHECK_INTERVAL_MS,
   STOPPED_RESUME_MIN_AGE_MS,
@@ -41,7 +57,7 @@ import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
-import { activityMtimeMs, blockedStopOf, scanLiveSessions, turnEndOf } from "./session-scan";
+import { activityMtimeMs, blockedStopOf, lastAssistantTextOf, lastToolUseOf, recentStepsOf, scanLiveSessions, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
@@ -85,6 +101,11 @@ if (process.env.TERMINAL_APP_DATA_DIR) {
 const logger = new Logger(dataDir);
 const projectStore = new ProjectStore(dataDir, logger);
 const stateStore = new StateStore();
+/**
+ * Jev（TypeSafe AI の判断専用モデル）クライアント（260922_2）。デモ・env TERMINAL_APP_JEV=off・キー無しでは
+ * 常に「判定なし」= 従来の表示ロジックだけで動く。判定は追加層（返答待ち／危険度／作業テキスト／停滞）
+ */
+const jev: JevClient = demoMode || jevDisabledByEnv() ? nullJevClient : createJevClient({ apiKey: loadTypesafeApiKey(), logger, model: process.env.TERMINAL_APP_JEV_MODEL });
 
 let win: BrowserWindow | null = null;
 let revision = 0;
@@ -231,11 +252,111 @@ function scheduleStopRecheck(sessionId: string, notify: boolean, project: Projec
       broadcast();
       return;
     }
-    if (notify && project !== null) {
-      showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
-    }
+    // 返答待ち判定（260922_2）: 最後の返答が質問・判断依頼で終わっていれば「完了」を「返答待ち」へ。
+    // 完了トーストはこの判定の後（返答待ちなら出さず、代わりに返答トースト）
+    void judgePendingQuestion(sessionId, project).then((pending) => {
+      if (pending) {
+        if (project !== null) showSessionToast(project, `${project.name}: 返答が必要です`, "Claude が質問して止まっています。");
+        broadcast();
+        return;
+      }
+      if (notify && project !== null) {
+        showSessionToast(project, `${project.name}: セッションが完了しました`, "応答が完了しました。");
+      }
+    });
   }, STOP_RECHECK_DELAY_MS);
   pendingStopChecks.set(sessionId, timer);
+}
+
+/* ---------------- Jev 判定（260922_2） ---------------- */
+
+/**
+ * 完了 → 返答待ち: Stop 後、transcript の最後の返答を Jev に渡し「ユーザーへの質問・判断依頼で終わっているか」を聞く。
+ * 戻り値: 実際に「返答待ち」へ変えたか。判定不能・その後イベントが来た・完了でなくなった、はすべて false
+ */
+async function judgePendingQuestion(sessionId: string, project: Project | null): Promise<boolean> {
+  if (!jev.available) return false;
+  const snap = stateStore.snapshotOf(sessionId);
+  if (snap === undefined || snap.state !== "done" || snap.transcriptPath === undefined) return false;
+  const state = pendingQuestionState(lastAssistantTextOf(snap.transcriptPath));
+  if (state === null) return false;
+  const verdict = interpretPendingQuestion(await jev.judge(state, pendingQuestionQuestions()));
+  if (verdict === null) return false;
+  const name = project?.name ?? "?";
+  logger.info(`Jev 返答待ち判定: ${name} (session=${sessionId}) → ${verdict.pending ? "返答待ち" : "完了のまま"} (${verdict.detail})`);
+  if (!verdict.pending) return false;
+  if (!stateStore.markQuestionPending(sessionId, snap.lastEventAt)) return false;
+  lastNotifiedState.set(sessionId, "confirm");
+  return true;
+}
+
+/**
+ * 確認待ちの危険度: Notification（権限確認）受信後、transcript の最後の tool_use を Jev に渡し
+ * 「取り消せない操作」「外部へ送る操作」「広範囲に影響」かを聞き、該当すればタイルに赤い印を出す
+ */
+async function judgeDanger(sessionId: string, project: Project | null, notificationMessage: string | undefined): Promise<void> {
+  if (!jev.available) return;
+  const snap = stateStore.snapshotOf(sessionId);
+  if (snap === undefined || snap.state !== "confirm" || snap.transcriptPath === undefined) return;
+  const state = dangerState(lastToolUseOf(snap.transcriptPath), notificationMessage);
+  if (state === null) return;
+  const verdict = interpretDanger(await jev.judge(state, dangerQuestions()));
+  if (verdict === null) return;
+  const name = project?.name ?? "?";
+  logger.info(`Jev 危険度判定: ${name} (session=${sessionId}) → ${verdict.text ?? "印なし"} (${verdict.detail})`);
+  if (stateStore.applyDangerText(sessionId, verdict.text)) broadcast();
+}
+
+/**
+ * 作業テキストの上書き防止: 短いプロンプト（「はい」「続けて」「A」等）が作業指示かを Jev に聞き、
+ * 作業指示なら置き換え、相槌・返答なら前の作業テキストを残す。判定不能なら従来どおり置き換える
+ */
+async function judgeWorkText(sessionId: string, prompt: string, project: Project | null): Promise<void> {
+  const verdict = interpretWorkText(await jev.judge(prompt, workTextQuestions()));
+  const name = project?.name ?? "?";
+  if (verdict === null) {
+    if (stateStore.setWorkText(sessionId, prompt)) broadcast(); // フォールバック = 従来動作
+    return;
+  }
+  logger.info(`Jev 作業テキスト判定: ${name} (session=${sessionId}) → ${verdict.replace ? "置き換え" : "前の文を維持"} (is_task=${verdict.p.toFixed(2)})`);
+  if (verdict.replace && stateStore.setWorkText(sessionId, prompt)) broadcast();
+}
+
+/** 停滞判定の記録: sessionId → 最後に判定した transcript の活動時刻と判定時刻（同じ材料・短い間隔で聞き直さない） */
+const stallJudged = new Map<string, { mtime: number; at: number }>();
+
+/**
+ * 停滞の疑い: 実行中セッションの直近の手順（tool_use / tool_result）を Jev に渡し「同じ失敗の繰り返し」「進展なし」かを聞く。
+ * 掃引ごとに呼ばれるが、transcript が動いていない・前回から STALL_MIN_INTERVAL_MS 未満のセッションは飛ばす
+ */
+async function judgeStalls(targets: ReadonlyArray<{ sessionId: string; projectId: string; transcriptPath?: string }>): Promise<void> {
+  if (!jev.available) return;
+  const live = new Set(stateStore.sessionIds());
+  for (const sid of stallJudged.keys()) if (!live.has(sid)) stallJudged.delete(sid);
+  let changed = false;
+  for (const t of targets) {
+    if (t.transcriptPath === undefined) continue;
+    const now = Date.now();
+    const mtime = activityMtimeMs(t.transcriptPath) ?? 0;
+    const prev = stallJudged.get(t.sessionId);
+    if (prev !== undefined && (prev.mtime === mtime || prev.at + STALL_MIN_INTERVAL_MS > now)) continue;
+    stallJudged.set(t.sessionId, { mtime, at: now });
+    const state = stallState(recentStepsOf(t.transcriptPath));
+    if (state === null) {
+      if (stateStore.applyStallText(t.sessionId, undefined)) changed = true;
+      continue;
+    }
+    const verdict = interpretStall(await jev.judge(state, stallQuestions()));
+    if (verdict === null) continue;
+    const before = stateStore.snapshotOf(t.sessionId);
+    if (before === undefined || before.state !== "running") continue; // 判定中に状態が変わった
+    if (stateStore.applyStallText(t.sessionId, verdict.text)) {
+      changed = true;
+      const project = projectStore.getProject(t.projectId);
+      logger.info(`Jev 停滞判定: ${project?.name ?? t.projectId} (session=${t.sessionId}) → ${verdict.text ?? "解消（印を消す）"} (${verdict.detail})`);
+    }
+  }
+  if (changed) broadcast();
 }
 
 function createAppEventServer(): EventServer {
@@ -243,8 +364,16 @@ function createAppEventServer(): EventServer {
     // デモ実行は hooks を書かず受信も不要のため空きポート（0）で listen し、
     // 実稼働インスタンス（既定 41321）と並走しても EADDRINUSE を起こさない（260712 課題C）
     port: demoMode ? 0 : projectStore.config.port,
-    onEvent: (evt, receivedAt) => {
-      cancelPendingStopCheck(evt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
+    onEvent: (rawEvt, receivedAt) => {
+      cancelPendingStopCheck(rawEvt.session_id); // 新しいイベントが来たら Stop 後の前倒し判定は取り消す（260907_1 R6）
+      // 作業テキストの上書き防止（260922_2）: 前の作業テキストがあり新しいプロンプトが短いときは、
+      // Jev の判定が出るまで prompt を伏せて（前の文を維持したまま）状態遷移だけ先に行う
+      let deferredPrompt: string | undefined;
+      let evt = rawEvt;
+      if (evt.hook_event_name === "UserPromptSubmit" && jev.available && shouldJudgeWorkText(evt.prompt, stateStore.workTextOf(evt.session_id))) {
+        deferredPrompt = evt.prompt;
+        evt = { ...evt, prompt: undefined };
+      }
       const result = stateStore.applyEvent(evt, projectStore.projects);
       if (result === null) {
         // design.md 10 章: 未登録 cwd・正常 SessionEnd は破棄してログのみ（UI は変えない）
@@ -272,6 +401,9 @@ function createAppEventServer(): EventServer {
       }
       lastNotifiedState.set(result.sessionId, result.state);
       broadcast(receivedAt);
+      // Jev 判定（260922_2）は配信の後に非同期で行い、結果が出たら改めて配信する
+      if (deferredPrompt !== undefined) void judgeWorkText(result.sessionId, deferredPrompt, project);
+      if (evt.hook_event_name === "Notification" && result.state === "confirm") void judgeDanger(result.sessionId, project, evt.message);
     },
     // statusLine 転送（260712_3 案A）: メトリクスをタイルへ反映し、整形テキストを
     // レスポンス本文として返す（curl 経由でそのままターミナルの statusline 表示になる）。
@@ -519,6 +651,8 @@ function sweepLiveness(): void {
   }
 
   const rest = targets.filter((t) => !concludedIds.has(t.sessionId));
+  // 停滞の疑い（260922_2）: 実行中セッションの直近の手順を Jev に聞く（非同期。結果は別途配信）
+  void judgeStalls(rest);
   let windows: TopLevelWindow[] | null = null;
   const windowPresent = (projectId: string): boolean | null => {
     const project = projectStore.getProject(projectId);
@@ -1325,6 +1459,11 @@ void app.whenReady().then(async () => {
     }
   }
 
+  logger.info(
+    jev.available
+      ? `Jev 判定: 有効 (model=${jev.model}) — 返答待ち／確認待ちの危険度／作業テキストの上書き防止／停滞の疑い`
+      : `Jev 判定: 無効（${demoMode ? "デモ実行" : jevDisabledByEnv() ? "TERMINAL_APP_JEV=off" : "API キー無し: env TYPESAFE_API_KEY か %USERPROFILE%/.typesafe.env"}）`
+  );
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);

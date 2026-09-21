@@ -297,3 +297,143 @@ export function scanLiveSessions(
   }
   return found.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
+
+/* ---------------- Jev 判定の材料（260922_2） ---------------- */
+
+/** レコードの message.content をブロック配列として返す（string content は text ブロック 1 つに正規化） */
+function contentBlocksOf(rec: Record<string, unknown>): Array<Record<string, unknown>> {
+  const message = rec.message as Record<string, unknown> | undefined;
+  if (message === undefined || message === null || typeof message !== "object") return [];
+  const content = message.content;
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (!Array.isArray(content)) return [];
+  return content.filter((b): b is Record<string, unknown> => b !== null && typeof b === "object");
+}
+
+/** tool_result の content（string または text ブロック配列）を 1 本の文字列に */
+function toolResultTextOf(block: Record<string, unknown>): string {
+  const content = block.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b: unknown) => (b !== null && typeof b === "object" && typeof (b as { text?: unknown }).text === "string" ? (b as { text: string }).text : ""))
+      .filter((t) => t !== "")
+      .join("\n");
+  }
+  return "";
+}
+
+/**
+ * 最後の assistant 返答の本文（新しい順に見て最初に text ブロックを持つ assistant レコード）。
+ * 1 ターンの最後の返答は複数レコードに分かれることがあるため、同じ message.id の text を古い順に連結する。
+ * 返答待ち判定（jev-judge.pendingQuestion）の材料。読めなければ undefined
+ */
+export function lastAssistantTextOf(filePath: string): string | undefined {
+  return lastAssistantTextFrom(tailRecords(filePath));
+}
+
+/** lastAssistantTextOf の本体（入力は「新しい順」のレコード列。テスト用に分離） */
+export function lastAssistantTextFrom(recordsNewestFirst: ReadonlyArray<Record<string, unknown>>): string | undefined {
+  let messageId: string | undefined;
+  const parts: string[] = [];
+  for (const rec of recordsNewestFirst) {
+    if (rec.type !== "assistant") {
+      if (messageId !== undefined) break; // 対象メッセージの前に別種のレコードが来たら終わり
+      // 直近が user（新しいプロンプト・tool_result）なら「最後の返答」はもう古い材料。呼び出し側の時刻判定に委ねる
+      continue;
+    }
+    const id = ((rec.message as Record<string, unknown> | undefined)?.id as string | undefined) ?? "";
+    if (messageId === undefined) messageId = id;
+    else if (id !== messageId) break;
+    const texts = contentBlocksOf(rec)
+      .filter((b) => b.type === "text" && typeof b.text === "string")
+      .map((b) => b.text as string);
+    if (texts.length > 0) parts.unshift(texts.join("\n"));
+  }
+  const joined = parts.join("\n").trim();
+  return joined === "" ? undefined : joined;
+}
+
+export interface ToolUseRecord {
+  name: string;
+  /** JSON.stringify(input)。長い引数は maxChars で切り詰める */
+  input: string;
+}
+
+/**
+ * 最後の assistant tool_use（許可待ちのツール呼び出し。新しい順に見て最初に見つかるもの）。
+ * 危険度判定（jev-judge.danger）の材料。無ければ undefined
+ */
+export function lastToolUseOf(filePath: string, maxChars = 3_000): ToolUseRecord | undefined {
+  return lastToolUseFrom(tailRecords(filePath), maxChars);
+}
+
+export function lastToolUseFrom(recordsNewestFirst: ReadonlyArray<Record<string, unknown>>, maxChars = 3_000): ToolUseRecord | undefined {
+  for (const rec of recordsNewestFirst) {
+    if (rec.type !== "assistant") continue;
+    const blocks = contentBlocksOf(rec);
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.type !== "tool_use" || typeof b.name !== "string") continue;
+      let input: string;
+      try {
+        input = JSON.stringify(b.input ?? {});
+      } catch {
+        input = "{}";
+      }
+      return { name: b.name, input: input.length > maxChars ? `${input.slice(0, maxChars)}…` : input };
+    }
+  }
+  return undefined;
+}
+
+export interface TranscriptStep {
+  kind: "tool_use" | "tool_result" | "text";
+  text: string;
+  error?: boolean;
+}
+
+/**
+ * 直近の手順（tool_use / tool_result / assistant text）を古い順に最大 maxSteps 件。
+ * 停滞判定（jev-judge.stall）の材料。tool_use は「名前 + 主要引数」、tool_result は先頭の抜粋、
+ * text は返答の抜粋。thinking・メタレコードは含めない
+ */
+export function recentStepsOf(filePath: string, maxSteps = 16, excerptChars = 300): TranscriptStep[] {
+  return recentStepsFrom(tailRecords(filePath), maxSteps, excerptChars);
+}
+
+export function recentStepsFrom(recordsNewestFirst: ReadonlyArray<Record<string, unknown>>, maxSteps = 16, excerptChars = 300): TranscriptStep[] {
+  const out: TranscriptStep[] = []; // 新しい順に積んで最後に反転
+  const clip = (s: string): string => {
+    const t = s.replace(/\s+/g, " ").trim();
+    return t.length > excerptChars ? `${t.slice(0, excerptChars)}…` : t;
+  };
+  for (const rec of recordsNewestFirst) {
+    if (out.length >= maxSteps) break;
+    if (rec.type === "assistant") {
+      const blocks = contentBlocksOf(rec);
+      for (let i = blocks.length - 1; i >= 0 && out.length < maxSteps; i--) {
+        const b = blocks[i];
+        if (b.type === "tool_use" && typeof b.name === "string") {
+          let input = "";
+          try {
+            input = JSON.stringify(b.input ?? {});
+          } catch {
+            input = "";
+          }
+          out.push({ kind: "tool_use", text: clip(`${b.name} ${input}`) });
+        } else if (b.type === "text" && typeof b.text === "string" && b.text.trim() !== "") {
+          out.push({ kind: "text", text: clip(b.text) });
+        }
+      }
+    } else if (rec.type === "user" && rec.isMeta !== true) {
+      const blocks = contentBlocksOf(rec);
+      for (let i = blocks.length - 1; i >= 0 && out.length < maxSteps; i--) {
+        const b = blocks[i];
+        if (b.type !== "tool_result") continue;
+        out.push({ kind: "tool_result", text: clip(toolResultTextOf(b)), error: b.is_error === true });
+      }
+    }
+  }
+  return out.reverse();
+}

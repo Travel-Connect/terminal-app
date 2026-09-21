@@ -25,18 +25,24 @@ interface DemoSeed {
    * 実運用では同じフォルダで複数の claude が動いていると自動で分かれる
    */
   extra?: Array<{ state: SessionState; ago: number; work?: string }>;
+  /** 260922_2: 危険度の印（confirm のみ。Jev 判定の表示確認用） */
+  danger?: string;
+  /** 260922_2: 停滞の疑いの印（running のみ。Jev 判定の表示確認用） */
+  stall?: string;
+  /** 260922_2: 確認待ちの種別（既定 permission。question = 返答待ち） */
+  confirmKind?: "permission" | "question";
 }
 
 /** モック面 1b の 12 タイル構成（context-design-mock.md） */
 const MOCK_1B: DemoSeed[] = [
   { name: "在庫管理-app", state: "done", ago: 120, work: "棚卸し差分のレポートを作成して", status: "レビュー待ち" }, // 完了・2分前
   { name: "商品登録-app", state: "running", ago: 48 * 60 + 12, work: "Yahooカテゴリ反映ボタンを追加して", status: "作業中" }, // 0:48:12
-  { name: "メルマガ作成-app", state: "confirm", ago: 60, work: "7月セールの下書きを作って" }, // 確認待ち・1分前
+  { name: "メルマガ作成-app", state: "confirm", ago: 60, work: "7月セールの下書きを作って", danger: "取り消せない操作・外部へ送る操作" }, // 確認待ち・1分前（260922_2: 危険度の印）
   { name: "商品ページ作成-app", state: "done", ago: 10, unlinked: true }, // 完了・たった今（Cursor は閉じている = 未接続）
-  { name: "受注管理-app", state: "running", ago: 15 * 60 + 4 },
+  { name: "受注管理-app", state: "confirm", ago: 15 * 60 + 4, work: "注文CSVの取込を直して", confirmKind: "question" }, // 260922_2: 返答待ち（Jev 判定）
   { name: "顧客分析-app", state: "running", ago: 7 * 60 + 41 },
   { name: "売上レポート-app", state: "error", ago: 8 * 60, status: "保留", unlinked: true }, // エラー・8分前（未接続）
-  { name: "発注最適化-app", state: "running", ago: 32 * 60 + 55 },
+  { name: "発注最適化-app", state: "running", ago: 32 * 60 + 55, work: "在庫の発注点を再計算して", stall: "停滞の疑い・同じ失敗を繰り返し" }, // 260922_2: 停滞の印
   { name: "レビュー返信-app", state: "running", ago: 3 * 60 + 2 },
   { name: "配送追跡-app", state: "running", ago: 51 * 60 + 30 },
   { name: "問い合わせbot", state: "running", ago: 60 * 60 + 5, unlinked: true }, // 実行中はウィンドウ無しでも灰色にしない（isUnlinked の除外規則の確認用）
@@ -78,9 +84,12 @@ export function seedDemo(projectStore: ProjectStore, stateStore: StateStore, cou
       state: seed.state,
       lastEventAt: now - seed.ago * 1000,
       runningSince: seed.state === "running" ? now - seed.ago * 1000 : undefined,
-      lastMessage: seed.state === "confirm" ? "Claude needs your permission to use Bash" : undefined,
+      lastMessage: seed.state === "confirm" ? (seed.confirmKind === "question" ? "Claude が返答を待っています" : "Claude needs your permission to use Bash") : undefined,
       workText: seed.work,
       firstSeenAt: now - 3600_000, // 1 本目が先に起動した想定（分割時の並び順）
+      confirmKind: seed.state === "confirm" ? (seed.confirmKind ?? "permission") : undefined,
+      dangerText: seed.state === "confirm" ? seed.danger : undefined,
+      stallText: seed.state === "running" ? seed.stall : undefined,
     });
     (seed.extra ?? []).forEach((ex, j) => {
       stateStore.seedSession({

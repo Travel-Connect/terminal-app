@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { autoArrangeIds, confirmFirstIds, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked } from "./format.js";
+import { autoArrangeIds, confirmFirstIds, confirmLabel, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked, tileAlertText } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -90,8 +90,9 @@ function tileStatusText(session: SessionView | undefined): string {
     // 未転送・取得不能時は経過時間のみ（フォールバック）
     return session.statsText !== undefined && session.statsText !== "" ? `${elapsed} · ${session.statsText}` : elapsed;
   }
-  const meta = STATE_META[session.state];
-  return `${meta.label}・${fmtRelative(Date.now() - session.lastEventAt)}`;
+  // 返答待ち（260922_2: Jev 判定の確認待ち）はラベルだけ変える（色・点滅・左上配置は確認待ちと同じ）
+  const label = session.state === "confirm" ? confirmLabel(session.confirmKind) : STATE_META[session.state].label;
+  return `${label}・${fmtRelative(Date.now() - session.lastEventAt)}`;
 }
 
 /** タイルのステータス行を更新（renderGrid と 1 秒毎の時刻更新で共用。差分がある時だけ DOM を触る） */
@@ -146,11 +147,15 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   // ループ進捗バッジ（260907_2）: 手動バッジと同じ行に並べる。両方無いときは行ごと隠してレイアウトを崩さない
   const loop = document.createElement("span");
   loop.className = "tile-loop";
+  // 注意印（260922_2）: 確認待ちの危険度／実行中の停滞の疑い（Jev 判定）。無いときは hidden
+  const alert = document.createElement("span");
+  alert.className = "tile-alert";
+  alert.hidden = true;
   loop.hidden = true;
   const badgeRow = document.createElement("span");
   badgeRow.className = "tile-badge-row";
   badgeRow.hidden = true;
-  badgeRow.append(badge, loop);
+  badgeRow.append(badge, loop, alert);
   head.append(nameRow, badgeRow);
   const center = document.createElement("span");
   center.className = "tile-center";
@@ -381,8 +386,16 @@ function renderGrid(): void {
       loopEl.title = loop; // 省略（…）されても hover で全文が読める
     }
     loopEl.hidden = loop === "";
+    // 注意印（260922_2）: 危険度／停滞の疑い。Jev 判定が無いセッション・待機タイルは非表示
+    const alertEl = el.querySelector(".tile-alert") as HTMLElement;
+    const alert = tileAlertText(session);
+    if (alertEl.textContent !== alert) {
+      alertEl.textContent = alert;
+      alertEl.title = alert;
+    }
+    alertEl.hidden = alert === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
-    badgeRowEl.hidden = badge === "" && loop === "";
+    badgeRowEl.hidden = badge === "" && loop === "" && alert === "";
     const icon = STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）

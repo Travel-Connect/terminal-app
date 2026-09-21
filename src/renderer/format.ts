@@ -3,7 +3,7 @@
  * 対応設計: design.md 5.1（経過時間・相対時刻の表示規則）／6.1（ステータスバーの 0 件省略）。
  * 前ループ evaluator 指摘（renderer 表示純関数のテスト未カバー）への対応として分離した。
  */
-import type { SessionState, StatusCounts } from "../shared/types";
+import type { SessionState, SessionView, StatusCounts } from "../shared/types";
 
 /** 実行中の経過時間 h:mm:ss（モック 1a: 1:24:01。design.md 5.1 / 6.2） */
 export function fmtElapsed(ms: number): string {
@@ -113,4 +113,21 @@ export function confirmFirstIds(ids: readonly string[], confirming: Record<strin
   if (front.length === 0) return [...ids];
   const back = ids.filter((id) => confirming[id] !== true);
   return [...front, ...back];
+}
+
+/**
+ * 確認待ちのラベル（260922_2）: Jev が「Claude の最後の返答が質問・判断依頼で終わっている」と判定した
+ * 返答待ち（confirmKind="question"）は「返答待ち」、それ以外（権限確認・入力待ち）は従来の「確認待ち」
+ */
+export function confirmLabel(confirmKind: SessionView["confirmKind"]): string {
+  return confirmKind === "question" ? "返答待ち" : "確認待ち";
+}
+
+/**
+ * タイルの注意印（260922_2）: 確認待ちの危険度（dangerText）と実行中の停滞の疑い（stallText）を 1 つの赤いピルに出す。
+ * 両方あることは無い（状態が排他）が、あれば危険度を優先。無ければ空文字（非表示）
+ */
+export function tileAlertText(session: Pick<SessionView, "dangerText" | "stallText"> | undefined): string {
+  if (session === undefined) return "";
+  return session.dangerText ?? session.stallText ?? "";
 }

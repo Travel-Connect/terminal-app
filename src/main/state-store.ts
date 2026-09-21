@@ -175,6 +175,21 @@ interface SessionRec {
   dead?: boolean;
   /** eval-loop の進捗バッジ文言（260907_2。eval-loop-status.loopTextForSessions 由来。無ければ非表示） */
   loopText?: string;
+  /** 確認待ちの種別（260922_2）。confirm 以外では持たない */
+  confirmKind?: "permission" | "question";
+  /** 危険度の印（260922_2）。confirm 以外では持たない */
+  dangerText?: string;
+  /** 停滞の疑いの印（260922_2）。running 以外では持たない */
+  stallText?: string;
+}
+
+/** 状態遷移に伴う Jev 由来の印の整理（260922_2）: 確認待ち以外では種別・危険度を、実行中以外では停滞を落とす */
+function clearJudgeMarks(rec: SessionRec): void {
+  if (rec.state !== "confirm") {
+    delete rec.confirmKind;
+    delete rec.dangerText;
+  }
+  if (rec.state !== "running") delete rec.stallText;
 }
 
 /**
@@ -229,6 +244,9 @@ function toView(rec: SessionRec): SessionView {
   if (rec.workText !== undefined) view.workText = rec.workText;
   if (rec.statsText !== undefined) view.statsText = rec.statsText;
   if (rec.loopText !== undefined) view.loopText = rec.loopText;
+  if (rec.confirmKind !== undefined) view.confirmKind = rec.confirmKind;
+  if (rec.dangerText !== undefined) view.dangerText = rec.dangerText;
+  if (rec.stallText !== undefined) view.stallText = rec.stallText;
   return view;
 }
 
@@ -305,7 +323,12 @@ export class StateStore extends EventEmitter {
     rec.projectId = project.id;
     // 切断検知（260712_2）用: transcript の実パスを保持（イベントに載っていれば常に最新へ更新）
     if (evt.transcript_path !== undefined) rec.transcriptPath = evt.transcript_path;
-    if (evt.hook_event_name === "Notification") rec.lastMessage = evt.message;
+    // イベントによる遷移では Jev 由来の印を一旦落とす（260922_2）。Notification は権限確認として種別を付け直す
+    clearJudgeMarks(rec);
+    if (evt.hook_event_name === "Notification") {
+      rec.lastMessage = evt.message;
+      rec.confirmKind = "permission";
+    }
     if (evt.hook_event_name === "UserPromptSubmit") {
       // 現在の作業テキスト（260712 課題B）: prompt が取れたときのみ更新（空は既存値を維持）
       const work = extractWorkText(evt.prompt);
@@ -445,6 +468,7 @@ export class StateStore extends EventEmitter {
     rec.state = "running";
     rec.runningSince = t;
     rec.lastEventAt = t;
+    clearJudgeMarks(rec);
     this.emit("changed");
     return true;
   }
@@ -473,6 +497,7 @@ export class StateStore extends EventEmitter {
     rec.runningSince = t;
     rec.lastEventAt = t;
     if (workText !== undefined) rec.workText = workText;
+    clearJudgeMarks(rec);
     this.emit("changed");
     return true;
   }
@@ -488,6 +513,7 @@ export class StateStore extends EventEmitter {
     rec.state = "disconnected";
     rec.runningSince = undefined;
     rec.lastEventAt = this.now();
+    clearJudgeMarks(rec);
     this.emit("changed");
     return true;
   }
@@ -519,6 +545,7 @@ export class StateStore extends EventEmitter {
         if (!concluded) return false; // 進行中の見立て → 現状維持
         // 実行中 + ターン終了済み → 「完了」へ（Stop 欠落スタックの手動ヒール）
         existing.state = "done";
+        clearJudgeMarks(existing);
         existing.runningSince = undefined;
         existing.lastEventAt = Math.max(existing.lastEventAt, info.lastEventAt);
         existing.transcriptPath = info.transcriptPath;
@@ -553,6 +580,7 @@ export class StateStore extends EventEmitter {
     rec.state = "done";
     rec.runningSince = undefined;
     rec.lastEventAt = this.now();
+    clearJudgeMarks(rec);
     this.emit("changed");
     return true;
   }
@@ -584,6 +612,69 @@ export class StateStore extends EventEmitter {
     if (rec === undefined || rec.loopText === text) return false;
     if (text === undefined) delete rec.loopText;
     else rec.loopText = text;
+    this.emit("changed");
+    return true;
+  }
+
+  /* ---------------- Jev 判定の反映（260922_2） ---------------- */
+
+  /** 現在の作業テキスト（作業テキストの上書き防止の precheck 用） */
+  workTextOf(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.workText;
+  }
+
+  /** 現在の状態と最終イベント時刻（非同期判定の「その後イベントが来ていないか」確認用） */
+  snapshotOf(sessionId: string): { state: SessionState; lastEventAt: number; transcriptPath?: string; lastMessage?: string } | undefined {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined) return undefined;
+    return { state: rec.state, lastEventAt: rec.lastEventAt, transcriptPath: rec.transcriptPath, lastMessage: rec.lastMessage };
+  }
+
+  /**
+   * 作業テキストを後から確定する（上書き防止の判定後）。prompt は extractWorkText で整形する。
+   * 状態・時刻には触れない。空・取得不能なら無変化
+   */
+  setWorkText(sessionId: string, prompt: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    const work = extractWorkText(prompt);
+    if (rec === undefined || work === undefined || rec.workText === work) return false;
+    rec.workText = work;
+    this.emit("changed");
+    return true;
+  }
+
+  /**
+   * 完了 → 返答待ち（Stop 後に Jev が「最後の返答が質問・判断依頼で終わっている」と判定。260922_2）。
+   * その後にイベントが届いていたら（lastEventAt が進んでいたら）適用しない。
+   * 表示は確認待ち（confirm）と同じで confirmKind="question"。経過時間の起点は持たない（確認待ちと同じ）
+   */
+  markQuestionPending(sessionId: string, sinceEventAt: number): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "done" || rec.lastEventAt !== sinceEventAt || rec.dead === true) return false;
+    rec.state = "confirm";
+    rec.confirmKind = "question";
+    rec.lastMessage = "Claude が返答を待っています";
+    rec.runningSince = undefined;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 危険度の印（260922_2）。確認待ち以外には付けない。値が変わったときだけ changed */
+  applyDangerText(sessionId: string, text: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "confirm" || rec.dangerText === text) return false;
+    if (text === undefined) delete rec.dangerText;
+    else rec.dangerText = text;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 停滞の疑いの印（260922_2）。実行中以外には付けない。値が変わったときだけ changed */
+  applyStallText(sessionId: string, text: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "running" || rec.stallText === text) return false;
+    if (text === undefined) delete rec.stallText;
+    else rec.stallText = text;
     this.emit("changed");
     return true;
   }

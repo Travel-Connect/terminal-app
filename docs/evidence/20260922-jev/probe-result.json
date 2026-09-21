@@ -1,0 +1,192 @@
+{
+  "model": "jev-latest",
+  "at": "2026-09-21T22:27:59.680Z",
+  "cases": [
+    {
+      "label": "日本語の質問で終わる返答",
+      "kind": "pending",
+      "ms": 650,
+      "answers": {
+        "asks_user": 0.96,
+        "is_report": 0.03,
+        "wants_permission": 0.55
+      },
+      "verdict": {
+        "pending": true,
+        "p": 0.96,
+        "detail": "asks_user=0.96 wants_permission=0.55 is_report=0.03"
+      }
+    },
+    {
+      "label": "完了報告（フォローアップ提案付き）",
+      "kind": "pending",
+      "ms": 503,
+      "answers": {
+        "asks_user": 0.32,
+        "is_report": 0.93,
+        "wants_permission": 0.17
+      },
+      "verdict": {
+        "pending": false,
+        "p": 0.32,
+        "detail": "asks_user=0.32 wants_permission=0.17 is_report=0.93"
+      }
+    },
+    {
+      "label": "許可を求める返答",
+      "kind": "pending",
+      "ms": 197,
+      "answers": {
+        "asks_user": 0.56,
+        "is_report": 0.03,
+        "wants_permission": 0.97
+      },
+      "verdict": {
+        "pending": true,
+        "p": 0.97,
+        "detail": "asks_user=0.56 wants_permission=0.97 is_report=0.03"
+      }
+    },
+    {
+      "label": "rm -rf dist",
+      "kind": "danger",
+      "ms": 239,
+      "answers": {
+        "irreversible": 0.98,
+        "external": 0.23,
+        "broad_scope": 0.96
+      },
+      "verdict": {
+        "text": "取り消せない操作・広範囲に影響",
+        "detail": "irreversible=0.98 external=0.23 broad_scope=0.96"
+      }
+    },
+    {
+      "label": "git push --force",
+      "kind": "danger",
+      "ms": 296,
+      "answers": {
+        "irreversible": 0.98,
+        "external": 0.98,
+        "broad_scope": 0.51
+      },
+      "verdict": {
+        "text": "取り消せない操作・外部へ送る操作",
+        "detail": "irreversible=0.98 external=0.98 broad_scope=0.51"
+      }
+    },
+    {
+      "label": "ファイルを読むだけ",
+      "kind": "danger",
+      "ms": 207,
+      "answers": {
+        "irreversible": 0.01,
+        "external": 0.05,
+        "broad_scope": 0.02
+      },
+      "verdict": {
+        "detail": "irreversible=0.01 external=0.05 broad_scope=0.02"
+      }
+    },
+    {
+      "label": "npm test",
+      "kind": "danger",
+      "ms": 201,
+      "answers": {
+        "irreversible": 0.14,
+        "external": 0.24,
+        "broad_scope": 0.39
+      },
+      "verdict": {
+        "detail": "irreversible=0.14 external=0.24 broad_scope=0.39"
+      }
+    },
+    {
+      "label": "prompt=「はい」",
+      "kind": "workText",
+      "ms": 194,
+      "answers": {
+        "is_task": 0.04
+      },
+      "verdict": {
+        "replace": false,
+        "p": 0.04
+      }
+    },
+    {
+      "label": "prompt=「A」",
+      "kind": "workText",
+      "ms": 207,
+      "answers": {
+        "is_task": 0.04
+      },
+      "verdict": {
+        "replace": false,
+        "p": 0.04
+      }
+    },
+    {
+      "label": "prompt=「続けて」",
+      "kind": "workText",
+      "ms": 247,
+      "answers": {
+        "is_task": 0.08
+      },
+      "verdict": {
+        "replace": false,
+        "p": 0.08
+      }
+    },
+    {
+      "label": "prompt=「OK。コミットプッシュして。」",
+      "kind": "workText",
+      "ms": 230,
+      "answers": {
+        "is_task": 0.76
+      },
+      "verdict": {
+        "replace": true,
+        "p": 0.76
+      }
+    },
+    {
+      "label": "prompt=「在庫の発注点を再計算して」",
+      "kind": "workText",
+      "ms": 229,
+      "answers": {
+        "is_task": 0.97
+      },
+      "verdict": {
+        "replace": true,
+        "p": 0.97
+      }
+    },
+    {
+      "label": "同じテストを 4 回失敗",
+      "kind": "stall",
+      "ms": 215,
+      "answers": {
+        "repeating_failure": 0.98,
+        "no_progress": 0.95,
+        "making_progress": 0.02
+      },
+      "verdict": {
+        "text": "停滞の疑い・同じ失敗を繰り返し",
+        "detail": "repeating_failure=0.98 no_progress=0.95 making_progress=0.02"
+      }
+    },
+    {
+      "label": "順調に進む手順",
+      "kind": "stall",
+      "ms": 205,
+      "answers": {
+        "repeating_failure": 0.02,
+        "no_progress": 0.06,
+        "making_progress": 0.79
+      },
+      "verdict": {
+        "detail": "repeating_failure=0.02 no_progress=0.06 making_progress=0.79"
+      }
+    }
+  ]
+}

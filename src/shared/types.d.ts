@@ -95,6 +95,22 @@ export interface SessionView {
    */
   loopText?: string;
   /**
+   * 確認待ちの種別（260922_2）。"permission" = Notification hook 由来（権限確認・入力待ち）、
+   * "question" = Stop 後に Jev が「Claude の最後の返答がユーザーへの質問・判断依頼で終わっている」と判定したもの。
+   * 表示は confirm と同じ（青の点滅・左上）だがラベルが「返答待ち」になる。confirm 以外では undefined
+   */
+  confirmKind?: "permission" | "question";
+  /**
+   * 確認待ちの危険度の印（260922_2）。Jev が許可待ちのツール呼び出しを「取り消せない操作」「外部へ送る操作」
+   * 「広範囲に影響」と判定したときの文言（「・」区切り）。該当なし・判定なしは undefined（非表示）
+   */
+  dangerText?: string;
+  /**
+   * 停滞の疑いの印（260922_2）。実行中セッションの直近の手順を Jev が「同じ失敗を繰り返し」「進展なし」と
+   * 判定したときの文言。実行中以外・判定なしは undefined（非表示）
+   */
+  stallText?: string;
+  /**
    * このセッションを最初に観測した時刻（epoch ms。260904_1 #3）。
    * 同じプロジェクトで複数セッションが並行するときの分割タイルの並び順（起動順）に使う
    */
