@@ -5,7 +5,7 @@
  * - projectConfirming: プロジェクト単位の「確認待ち」判定（分割タイルはいずれか 1 本でも確認待ちなら該当）
  */
 import { describe, expect, it } from "vitest";
-import { confirmFirstIds, projectConfirming } from "../src/renderer/format";
+import { confirmFirstIds, confirmTilesFirst, projectConfirming } from "../src/renderer/format";
 
 describe("confirmFirstIds（260922_1: 確認待ちを先頭へ）", () => {
   it("確認待ちのプロジェクトを先頭へ移し、それ以外は後ろへ。それぞれの相対順は保つ", () => {
@@ -52,5 +52,25 @@ describe("projectConfirming（260922_1: プロジェクト単位の確認待ち�
   it("待機タイル（セッション無し = undefined）や空配列は該当しない", () => {
     expect(projectConfirming([undefined])).toBe(false);
     expect(projectConfirming([])).toBe(false);
+  });
+});
+
+describe("confirmTilesFirst（260922_3: タイル単位で確認待ちを先頭へ）", () => {
+  it("確認待ちのタイルを先頭へ出し、残りの相対順は保つ（分割タイルの ② が確認待ちでも左上）", () => {
+    const tiles = [
+      { key: "dev|1", state: "done" },
+      { key: "dev|2", state: "confirm" },
+      { key: "dev|3", state: "done" },
+      { key: "mail", state: "confirm" },
+      { key: "other", state: "running" },
+    ];
+    expect(confirmTilesFirst(tiles, (t) => t.state === "confirm").map((t) => t.key)).toEqual(["dev|2", "mail", "dev|1", "dev|3", "other"]);
+  });
+
+  it("確認待ちが無ければ順序は変わらず、元配列は変更しない。待機（session 無し）は対象外", () => {
+    const tiles = [{ key: "a", state: "done" }, { key: "b", state: undefined }];
+    const out = confirmTilesFirst(tiles, (t) => t.state === "confirm");
+    expect(out.map((t) => t.key)).toEqual(["a", "b"]);
+    expect(out).not.toBe(tiles);
   });
 });

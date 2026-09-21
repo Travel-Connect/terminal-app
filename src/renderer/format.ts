@@ -131,3 +131,14 @@ export function tileAlertText(session: Pick<SessionView, "dangerText" | "stallTe
   if (session === undefined) return "";
   return session.dangerText ?? session.stallText ?? "";
 }
+
+/**
+ * タイル単位の確認待ち先頭配置（260922_3）: 分割タイル（同じプロジェクトの ①②…）の中に確認待ちが混ざるとき、
+ * プロジェクト単位の並べ替え（confirmFirstIds）だけでは「dev ①（完了）」が先頭に来て確認待ちの ② が左上にならない。
+ * 表示直前にタイル一覧を安定分割し、確認待ちのタイルを全部先頭へ出す（残りの相対順・番号はそのまま）
+ */
+export function confirmTilesFirst<T>(items: readonly T[], isConfirm: (item: T) => boolean): T[] {
+  const front = items.filter((it) => isConfirm(it));
+  if (front.length === 0) return [...items];
+  return [...front, ...items.filter((it) => !isConfirm(it))];
+}

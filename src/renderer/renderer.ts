@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { autoArrangeIds, confirmFirstIds, confirmLabel, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked, tileAlertText } from "./format.js";
+import { autoArrangeIds, confirmFirstIds, confirmLabel, confirmTilesFirst, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked, tileAlertText } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -327,7 +327,8 @@ function buildTileSpecs(s: Snapshot): TileSpec[] {
       specs.push({ key: project.id, project, session: s.sessions[project.id] });
     }
   }
-  return specs;
+  // 確認待ち・返答待ちのタイルそのものを先頭へ（260922_3。分割タイルの ② が確認待ちでも左上に来る）
+  return confirmTilesFirst(specs, (spec) => spec.session?.state === "confirm");
 }
 
 function renderGrid(): void {
