@@ -57,7 +57,7 @@ import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
-import { activityMtimeMs, blockedStopOf, lastAssistantTextOf, lastToolUseOf, recentStepsOf, scanLiveSessions, turnEndOf } from "./session-scan";
+import { activityMtimeMs, blockedStopOf, lastAssistantTextOf, lastToolUseOf, recentStepsOf, scanLiveSessions, selectRestorable, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
@@ -780,13 +780,32 @@ async function unregisterProjectById(id: string): Promise<OpResult> {
 function reconnectProject(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
-  const found = scanLiveSessions(project.path);
+  const r = restoreProjectSessions(project, readSessionRegistry());
+  const detail = r.concluded.length > 0 ? `（うち終了済み → 完了 ${r.concluded.length} 件）` : "";
+  logger.info(`再接続: ${project.name} — 走査 ${r.found} 件 / 復元 ${r.revived} 件${detail}`);
+  setStatus(
+    r.revived > 0
+      ? `再接続: ${project.name} のセッション ${r.revived} 件を復元しました${detail}`
+      : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
+  );
+  // 完了で復元したものは Jev で「返答待ち」かを一括判定（260922_3）
+  void judgePendingForRestored(r.concluded, project);
+}
+
+/**
+ * 1 プロジェクトの transcript 走査 → 復元（起動時復元・再接続で共通。260922_3）。
+ * 対象は selectRestorable（登録簿で生きているセッション優先）。戻り値に完了で復元したセッション id を含める
+ */
+function restoreProjectSessions(project: Project, registry: RegistryEntry[] | null): { found: number; revived: number; concluded: string[] } {
+  // 登録簿で生きていれば更新が古くても拾うため、走査窓は広め（24 時間）。dead は selectRestorable が落とす
+  const scanned = scanLiveSessions(project.path, { activeMs: 24 * 60 * 60_000 });
+  const found = selectRestorable(scanned, (sid) => classifyLiveness(registry, sid), Date.now());
   let revived = 0;
-  let concluded = 0;
+  const concluded: string[] = [];
   for (const s of found) {
     const ok = stateStore.reviveSession({
       sessionId: s.sessionId,
-      projectId: id,
+      projectId: project.id,
       lastEventAt: s.mtimeMs,
       transcriptPath: s.transcriptPath,
       workText: s.workText,
@@ -794,15 +813,51 @@ function reconnectProject(id: string): void {
     });
     if (!ok) continue;
     revived += 1;
-    if (s.turnEnd === "concluded") concluded += 1;
+    if (s.turnEnd === "concluded") concluded.push(s.sessionId);
   }
-  const detail = concluded > 0 ? `（うち終了済み → 完了 ${concluded} 件）` : "";
-  logger.info(`再接続: ${project.name} — 走査 ${found.length} 件 / 復元 ${revived} 件${detail}`);
-  setStatus(
-    revived > 0
-      ? `再接続: ${project.name} のセッション ${revived} 件を復元しました${detail}`
-      : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
+  return { found: scanned.length, revived, concluded };
+}
+
+/** 復元した「完了」セッションを順に Jev で判定し、返答待ちなら切り替える（260922_3）。戻り値: 返答待ちにした件数 */
+async function judgePendingForRestored(sessionIds: readonly string[], project: Project): Promise<number> {
+  if (!jev.available || sessionIds.length === 0) return 0;
+  let pending = 0;
+  for (const sid of sessionIds) {
+    if (await judgePendingQuestion(sid, project)) pending += 1;
+  }
+  if (pending > 0) broadcast();
+  return pending;
+}
+
+/**
+ * 起動時復元（260922_3）: セッション表示はメモリ上だけなので、再起動直後は全タイルが「待機」になる。
+ * 登録済み全プロジェクトの transcript を走査して、登録簿で生きているセッションを「完了」「実行中」で復元し、
+ * 完了のものは Jev で「返答待ち」かを一括判定する（質問して止まったままのセッションを拾う）
+ */
+async function restoreSessionsAtStartup(): Promise<void> {
+  const registry = readSessionRegistry();
+  let revived = 0;
+  const concludedAll: Array<{ sid: string; project: Project }> = [];
+  for (const project of projectStore.projects) {
+    try {
+      const r = restoreProjectSessions(project, registry);
+      revived += r.revived;
+      for (const sid of r.concluded) concludedAll.push({ sid, project });
+    } catch (e) {
+      logger.warn(`起動時復元に失敗（続行）: ${project.name} — ${String(e)}`);
+    }
+  }
+  if (revived > 0) broadcast();
+  let pending = 0;
+  for (const c of concludedAll) {
+    if (await judgePendingQuestion(c.sid, c.project)) pending += 1;
+  }
+  if (pending > 0) broadcast();
+  logger.info(
+    `起動時復元: ${projectStore.projects.length} プロジェクトを走査 → 復元 ${revived} 件（完了 ${concludedAll.length}・実行中 ${revived - concludedAll.length}）` +
+      (jev.available ? ` → Jev 返答待ち ${pending} 件` : "")
   );
+  if (revived > 0) setStatus(`起動時復元: セッション ${revived} 件を復元${pending > 0 ? `（返答待ち ${pending} 件）` : ""}`);
 }
 
 /* ---------------- 開発サーバー起動・停止（260722_1） ---------------- */
@@ -1469,6 +1524,7 @@ void app.whenReady().then(async () => {
   );
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
+    void restoreSessionsAtStartup(); // 起動時復元（260922_3）: 待機になった全タイルを transcript と登録簿から復元し、Jev で返答待ちを拾う
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
     // 未接続タイル（260903_1）: 起動直後に 1 回判定し、以後は約 5 秒ごとに更新（変化時のみ配信）
     pollWindowPresence();

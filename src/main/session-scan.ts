@@ -437,3 +437,26 @@ export function recentStepsFrom(recordsNewestFirst: ReadonlyArray<Record<string,
   }
   return out.reverse();
 }
+
+/* ---------------- 起動時復元の対象選定（260922_3） ---------------- */
+
+/**
+ * 走査で見つかったセッションのうち復元するものを選ぶ（起動時復元・再接続で共通）。
+ * - 登録簿でプロセスが生きている（alive）セッションは、transcript の更新が古くても復元する
+ *   （質問して止まったまま何時間も待っているセッションを拾うため）
+ * - 登録簿に無い（dead）セッションは復元しない（ターミナルを閉じた古い transcript）
+ * - 登録簿が読めない（unknown）ときだけ、従来どおり更新が fallbackActiveMs 以内のものを復元する
+ */
+export function selectRestorable<T extends { sessionId: string; mtimeMs: number }>(
+  found: readonly T[],
+  liveness: (sessionId: string) => "alive" | "dead" | "unknown",
+  now: number,
+  fallbackActiveMs: number = RECONNECT_ACTIVE_MS
+): T[] {
+  return found.filter((s) => {
+    const l = liveness(s.sessionId);
+    if (l === "alive") return true;
+    if (l === "dead") return false;
+    return now - s.mtimeMs <= fallbackActiveMs;
+  });
+}
