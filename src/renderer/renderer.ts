@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { autoArrangeIds, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectLinked } from "./format.js";
+import { autoArrangeIds, confirmFirstIds, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -291,12 +291,28 @@ function autoArrange(): void {
 }
 
 /**
- * Snapshot → タイル一覧（260904_1 #3）。プロジェクト順に、分割対象（splitSessions にキーあり）は
+ * 表示順のプロジェクト一覧（260922_1）: 確認待ちのプロジェクトを先頭（左上）へ寄せる。
+ * Snapshot.projects（= projects.json の並び）そのものは変えない — D&D（reorderByDrop）と自動整列は
+ * 引き続き projects.json の並びを基準に動き、確認待ちが解ければタイルは元の位置へ戻る
+ */
+function displayProjects(s: Snapshot): Project[] {
+  const confirming: Record<string, boolean> = {};
+  for (const p of s.projects) {
+    const members = s.splitSessions[p.id];
+    const states = members !== undefined && members.length >= 2 ? members.map((m) => m.state) : [s.sessions[p.id]?.state];
+    confirming[p.id] = projectConfirming(states);
+  }
+  const byId = new Map(s.projects.map((p) => [p.id, p] as const));
+  return confirmFirstIds(s.projects.map((p) => p.id), confirming).map((id) => byId.get(id)!);
+}
+
+/**
+ * Snapshot → タイル一覧（260904_1 #3）。表示順（260922_1: 確認待ちが先頭）に、分割対象（splitSessions にキーあり）は
  * セッションごとに 1 タイル（起動順・番号付き）、それ以外は従来の 1 タイル
  */
 function buildTileSpecs(s: Snapshot): TileSpec[] {
   const specs: TileSpec[] = [];
-  for (const project of s.projects) {
+  for (const project of displayProjects(s)) {
     const members = s.splitSessions[project.id];
     if (members !== undefined && members.length >= 2) {
       members.forEach((session, i) => {

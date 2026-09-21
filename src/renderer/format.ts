@@ -93,3 +93,24 @@ export function moveProjectId(ids: readonly string[], fromId: string, toId: stri
   next.splice(after ? to + 1 : to, 0, fromId);
   return next;
 }
+
+/**
+ * プロジェクト単位の「確認待ち」判定（260922_1）。分割タイルはいずれか 1 本でも confirm なら該当。
+ * 待機タイル（undefined）・空配列は該当しない
+ */
+export function projectConfirming(states: readonly (SessionState | undefined)[]): boolean {
+  return states.some((state) => state === "confirm");
+}
+
+/**
+ * 確認待ちを先頭へ（260922_1）: 確認待ちのプロジェクトを**表示上だけ**グリッドの先頭（左上）へ寄せる。
+ * autoArrangeIds と違い projects.json の並び（ユーザーの D&D 順）には書き戻さない — 確認待ちが解ければ
+ * 元の位置へ自然に戻り、並び順が勝手に壊れない。各グループ内の相対順は元の順を保つ。
+ * confirming に無い id（undefined）は確認待ちではない扱い（明示的な true だけを前へ出す）
+ */
+export function confirmFirstIds(ids: readonly string[], confirming: Record<string, boolean>): string[] {
+  const front = ids.filter((id) => confirming[id] === true);
+  if (front.length === 0) return [...ids];
+  const back = ids.filter((id) => confirming[id] !== true);
+  return [...front, ...back];
+}
