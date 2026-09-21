@@ -403,7 +403,10 @@ function createAppEventServer(): EventServer {
       broadcast(receivedAt);
       // Jev 判定（260922_2）は配信の後に非同期で行い、結果が出たら改めて配信する
       if (deferredPrompt !== undefined) void judgeWorkText(result.sessionId, deferredPrompt, project);
-      if (evt.hook_event_name === "Notification" && result.state === "confirm") void judgeDanger(result.sessionId, project, evt.message);
+      // 危険度は権限確認（permission）のときだけ。無操作（idle）等の Notification は許可待ちのツール呼び出しが無い
+      if (evt.hook_event_name === "Notification" && result.state === "confirm" && classifyNotification(evt.message) === "permission") {
+        void judgeDanger(result.sessionId, project, evt.message);
+      }
     },
     // statusLine 転送（260712_3 案A）: メトリクスをタイルへ反映し、整形テキストを
     // レスポンス本文として返す（curl 経由でそのままターミナルの statusline 表示になる）。
