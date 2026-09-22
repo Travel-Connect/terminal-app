@@ -74,6 +74,13 @@ export const BLOCKED_STOP_MARGIN_MS = 2_000;
  */
 export const SUBAGENT_RESUME_MARGIN_MS = 3_000;
 
+/**
+ * subagent 記録がこの時間内に更新されていれば「バックグラウンドのエージェントが作業中」とみなす（260922_8）。
+ * 終了検知（findConcluded）の対象から外す判断に使う — 外さないと
+ * 「完了へ降格 → サブエージェント待ちで実行中へ復帰」を掃引のたびに繰り返す
+ */
+export const SUBAGENT_ACTIVE_WINDOW_MS = 60_000;
+
 export interface ConfirmTarget extends SweepTarget {
   /** 確認待ちへ遷移したイベントの時刻（epoch ms） */
   lastEventAt: number;

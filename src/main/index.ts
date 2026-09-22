@@ -47,6 +47,7 @@ import {
 import {
   DISCONNECT_CHECK_INTERVAL_MS,
   STOPPED_RESUME_MIN_AGE_MS,
+  SUBAGENT_ACTIVE_WINDOW_MS,
   findConcluded,
   findDisconnected,
   findResumedFromConfirm,
@@ -212,6 +213,13 @@ const lastNotifiedState = new Map<string, SessionState>();
 const pendingStopChecks = new Map<string, NodeJS.Timeout>();
 /** サブエージェント待ちのタイルに出す文言（260922_8） */
 const BG_AGENT_TEXT = "サブエージェント待ち";
+/**
+ * Jev の文面判定で「サブエージェント待ち」として実行中へ戻した記録（260922_8）:
+ * sessionId → そのときの本体 transcript mtime。同じターンでは一度しか戻さない
+ * （戻す → 終了検知で完了 → また戻す、の往復と Jev の無駄打ちを防ぐ。2026-09-22 06:46 実測）。
+ * subagent 記録が実際に動いている間は掃引側（SUBAGENT_ACTIVE_WINDOW_MS）が実行中に保つ
+ */
+const bgResumedAt = new Map<string, number>();
 /** Stop 受信 → 前倒し判定までの待ち = 登録簿が idle へ切り替わる猶予（STOPPED_RESUME_MIN_AGE_MS）＋余裕 */
 const STOP_RECHECK_DELAY_MS = STOPPED_RESUME_MIN_AGE_MS + 500;
 
@@ -303,6 +311,9 @@ async function judgePendingQuestion(sessionId: string, project: Project | null):
   if (snap === undefined || snap.state !== "done" || snap.transcriptPath === undefined) return false;
   const state = pendingQuestionState(lastAssistantTextOf(snap.transcriptPath));
   if (state === null) return false;
+  // 同じターンで既に「サブエージェント待ち」と判定していれば、聞き直さない（往復の防止。260922_8）
+  const mainMtime = statMtimeMs(snap.transcriptPath);
+  if (mainMtime !== null && bgResumedAt.get(sessionId) === mainMtime) return false;
   const verdict = interpretPendingQuestion(await jev.judge(state, pendingQuestionQuestions()));
   if (verdict === null) return false;
   const name = project?.name ?? "?";
@@ -310,6 +321,7 @@ async function judgePendingQuestion(sessionId: string, project: Project | null):
   logger.info(`Jev 返答待ち判定: ${name} (session=${sessionId}) → ${label} (${verdict.detail})`);
   // 裏でエージェントが動いていると書いてあれば「実行中」に戻す（260922_8）
   if (verdict.background) {
+    if (mainMtime !== null) bgResumedAt.set(sessionId, mainMtime);
     if (stateStore.resumeFromStopped(sessionId)) {
       stateStore.applyBgText(sessionId, BG_AGENT_TEXT);
       lastNotifiedState.set(sessionId, "running");
@@ -688,6 +700,11 @@ const deadStrikes = new Map<string, number>();
 function sweepLiveness(): void {
   let changed = false;
 
+  // 消えたセッションの判定記録を捨てる（260922_8）
+  if (bgResumedAt.size > 0) {
+    const live = new Set(stateStore.sessionIds());
+    for (const sid of bgResumedAt.keys()) if (!live.has(sid)) bgResumedAt.delete(sid);
+  }
   const registry = readSessionRegistry();
   if (registry !== null) {
     for (const sid of stateStore.sessionIds()) {
@@ -787,7 +804,20 @@ function sweepLiveness(): void {
     return;
   }
 
-  const concludedHits = findConcluded(targets, { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf });
+  // サブエージェント待ち（260922_8）: 裏でエージェントが動いている実行中セッションは終了検知の対象から外し、
+  // バッジで理由を示す。外さないと「完了へ降格 → 実行中へ復帰」を掃引のたびに繰り返す
+  const bgActive = new Set<string>();
+  for (const t of targets) {
+    if (t.transcriptPath === undefined) continue;
+    const sub = subagentMtimeMs(t.transcriptPath);
+    const active = sub !== null && sub > Date.now() - SUBAGENT_ACTIVE_WINDOW_MS;
+    if (active) bgActive.add(t.sessionId);
+    if (stateStore.applyBgText(t.sessionId, active ? BG_AGENT_TEXT : undefined)) changed = true;
+  }
+  const concludedHits = findConcluded(
+    targets.filter((t) => !bgActive.has(t.sessionId)),
+    { now: () => Date.now(), mtimeMs: statMtimeMs, turnEnd: turnEndOf }
+  );
   const concludedIds = new Set<string>();
   for (const t of concludedHits) {
     if (!stateStore.markConcluded(t.sessionId)) continue;
