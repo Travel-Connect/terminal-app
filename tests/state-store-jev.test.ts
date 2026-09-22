@@ -160,3 +160,34 @@ describe("setWorkText / workTextOf / snapshotOf（作業テキストの後追い
     expect(store.snapshotOf("nope")).toBeUndefined();
   });
 });
+
+describe("questionPendingSessions（260922_4: 返答待ちの復帰判定の対象）", () => {
+  it("返答待ち（question）だけを返し、Stop の時刻と返答待ちにした時刻を別々に持つ", () => {
+    const t = { v: 1000 };
+    const store = storeAt(t);
+    store.applyEvent(evt("Stop", "s1"), projects);
+    store.applyEvent(evt("Notification", "s2", { message: "perm" }), projects); // 権限確認は対象外
+    t.v = 5000; // Stop から 4 秒後に返答待ちへ（Jev 判定の待ち時間）
+    expect(store.markQuestionPending("s1", 1000)).toBe(true);
+    expect(store.questionPendingSessions()).toEqual([
+      { sessionId: "s1", projectId: "p1", transcriptPath: "C:/t/s.jsonl", stoppedAt: 1000, pendingSince: 5000 },
+    ]);
+    // 表示の起点（lastEventAt）は Stop のまま = タイルは「返答待ち・止まった時刻から」
+    expect(store.displaySessions(projects)["p1"].lastEventAt).toBe(1000);
+  });
+
+  it("実行中へ戻ると対象から外れ、基準時刻も消える（次に返答待ちになれば付け直す）", () => {
+    const t = { v: 1000 };
+    const store = storeAt(t);
+    store.applyEvent(evt("Stop", "s1"), projects);
+    t.v = 5000;
+    store.markQuestionPending("s1", 1000);
+    expect(store.resumeFromConfirm("s1")).toBe(true);
+    expect(store.questionPendingSessions()).toEqual([]);
+    t.v = 9000;
+    store.applyEvent(evt("Stop", "s1"), projects);
+    t.v = 13000;
+    expect(store.markQuestionPending("s1", 9000)).toBe(true);
+    expect(store.questionPendingSessions()[0]).toEqual({ sessionId: "s1", projectId: "p1", transcriptPath: "C:/t/s.jsonl", stoppedAt: 9000, pendingSince: 13000 });
+  });
+});

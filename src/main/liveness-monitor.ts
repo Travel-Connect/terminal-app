@@ -240,3 +240,66 @@ export function findDisconnected(targets: readonly SweepTarget[], deps: SweepDep
   }
   return out;
 }
+
+/* ---------------- 返答待ちからの復帰（260922_4） ---------------- */
+
+/** 「返答待ち」にしてから復帰判定を始めるまでの猶予（Stop 直後の後片付けと判定処理の重なりを避ける） */
+export const QUESTION_RESUME_MIN_AGE_MS = envMs("TERMINAL_APP_QUESTION_RESUME_MIN_AGE_MS", 3_000);
+
+export interface QuestionTarget extends SweepTarget {
+  /** Stop を受けた（または終了検知した）時刻。block 痕跡の探索起点・タイルの「返答待ち・N分前」の起点 */
+  stoppedAt: number;
+  /** 「返答待ち」にした時刻。活動の比較基準（Stop 直後に書かれる後片付けレコードを再開と誤認しないため） */
+  pendingSince: number;
+}
+
+export interface QuestionResumeDeps {
+  now(): number;
+  /** Claude Code の登録簿 status（busy / waiting / idle）。無ければ undefined */
+  registryStatus(sessionId: string): string | undefined;
+  /** transcript 終端の分類（session-scan.turnEndOf を注入） */
+  turnEnd(path: string): "concluded" | "open" | "unknown";
+  /** sinceMs 以降の block 痕跡（session-scan.blockedStopOf を注入） */
+  blockedStop(path: string, sinceMs: number): BlockedStop | null;
+}
+
+export interface QuestionResumeHit {
+  target: QuestionTarget;
+  /** 何を根拠に戻したか: 登録簿が busy / Stop hook が続行を指示 / ターンが再開している */
+  reason: "registry" | "blocked-stop" | "turn-open";
+  blockReason?: string;
+}
+
+/**
+ * 返答待ち → 実行中の復帰検知（260922_4）。
+ *
+ * 背景: 「返答待ち」（Jev 判定）は実質「完了」の言い換えなので、完了・切断と同じ復帰経路が要る。
+ * 導入直後の実ログ（2026-09-22 01:23:42 → 01:24:36）で、返答待ちにした直後に作業が進んでいるのに
+ * 確認待ち用の復帰規則（transcript の mtime のみ）しか効かず、タイルが取り残されるケースが出た。
+ *
+ * 根拠は 3 系統（上から順に評価し、最初に成立したものを理由にする）:
+ * - 登録簿 status が busy、かつ transcript 終端が concluded でない（busy の残骸への保険）
+ * - transcript に block 痕跡（preventedContinuation=true）がある。Stop hook が遅れて書かれた場合も拾う
+ * - transcript 終端が open = ターンが再開している（ユーザーが返答した／Claude が続行した）。
+ *   mtime ではなく終端分類で見るため、後片付けの書き込みでは戻らない
+ */
+export function findResumedFromQuestion(targets: readonly QuestionTarget[], deps: QuestionResumeDeps): QuestionResumeHit[] {
+  const out: QuestionResumeHit[] = [];
+  const now = deps.now();
+  for (const t of targets) {
+    if (now - t.pendingSince < QUESTION_RESUME_MIN_AGE_MS) continue;
+    const turn = t.transcriptPath === undefined ? "unknown" : deps.turnEnd(t.transcriptPath);
+    if (deps.registryStatus(t.sessionId) === "busy" && turn !== "concluded") {
+      out.push({ target: t, reason: "registry" });
+      continue;
+    }
+    if (t.transcriptPath === undefined) continue;
+    const blocked = deps.blockedStop(t.transcriptPath, t.stoppedAt - BLOCKED_STOP_MARGIN_MS);
+    if (blocked !== null) {
+      out.push({ target: t, reason: "blocked-stop", blockReason: blocked.reason });
+      continue;
+    }
+    if (turn === "open") out.push({ target: t, reason: "turn-open" });
+  }
+  return out;
+}

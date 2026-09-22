@@ -47,6 +47,7 @@ import {
   findConcluded,
   findDisconnected,
   findResumedFromConfirm,
+  findResumedFromQuestion,
   findResumedFromStopped,
   type StoppedResumeDeps,
   type StoppedResumeHit,
@@ -285,6 +286,13 @@ async function judgePendingQuestion(sessionId: string, project: Project | null):
   const name = project?.name ?? "?";
   logger.info(`Jev 返答待ち判定: ${name} (session=${sessionId}) → ${verdict.pending ? "返答待ち" : "完了のまま"} (${verdict.detail})`);
   if (!verdict.pending) return false;
+  // 適用直前の再確認（260922_4）: 判定を待つ間に作業が再開していたら「返答待ち」にしない。
+  // 登録簿 busy（Claude Code 自身の申告）／transcript 終端が open（ターン継続中）が根拠
+  const turn = turnEndOf(snap.transcriptPath);
+  if (turn === "open" || registryStatusOf(readSessionRegistry(), sessionId) === "busy") {
+    logger.info(`Jev 返答待ち判定を見送り: ${name} (session=${sessionId}) — 作業が進行中（終端=${turn}）`);
+    return false;
+  }
   if (!stateStore.markQuestionPending(sessionId, snap.lastEventAt)) return false;
   lastNotifiedState.set(sessionId, "confirm");
   return true;
@@ -631,6 +639,32 @@ function sweepLiveness(): void {
     }
   }
 
+  // (1''') 返答待ち（Jev 判定）からの復帰（260922_4）: 返答待ちは実質「完了」なので、完了・切断と同じ根拠
+  //        （登録簿 busy／block 痕跡／ターン再開）で「実行中」へ戻す。確認待ち用の mtime 規則だけでは
+  //        subagent・codex 待ちや遅れて書かれた block 痕跡を拾えず、作業中のタイルが取り残されていた
+  const questionTargets = stateStore.questionPendingSessions();
+  if (questionTargets.length > 0) {
+    const hits = findResumedFromQuestion(questionTargets, {
+      now: () => Date.now(),
+      registryStatus: (sid) => registryStatusOf(registry, sid),
+      turnEnd: turnEndOf,
+      blockedStop: blockedStopOf,
+    });
+    for (const hit of hits) {
+      if (!stateStore.resumeFromConfirm(hit.target.sessionId)) continue;
+      changed = true;
+      lastNotifiedState.set(hit.target.sessionId, "running");
+      const project = projectStore.getProject(hit.target.projectId);
+      const why =
+        hit.reason === "registry"
+          ? "登録簿 status=busy"
+          : hit.reason === "blocked-stop"
+            ? "Stop hook が続行を指示"
+            : "ターンが再開（transcript 終端が open）";
+      logger.info(`返答待ちから実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${why}`);
+    }
+  }
+
   // (1'') ループ進捗バッジ（260907_2）: eval-loop の registry / state.json から各セッションの進捗文言を更新する。
   //       状態遷移には触れない（statusLine 転送と同じ扱い）。出現・消滅だけログに残す（経過分の変化は残さない）
   if (updateLoopTexts()) changed = true;
@@ -651,6 +685,14 @@ function sweepLiveness(): void {
     logger.info(
       `終了検知: ${project?.name ?? t.projectId} (session=${t.sessionId}) — Stop 未受信だが transcript がターン完了を示すため「完了」へ`
     );
+  }
+
+  // Stop hook が発火しない経路（割り込み・hook 未設定）で「完了」にしたセッションも返答待ちかを判定する（260922_4）
+  for (const t of concludedHits) {
+    if (!concludedIds.has(t.sessionId)) continue;
+    void judgePendingQuestion(t.sessionId, projectStore.getProject(t.projectId)).then((pending) => {
+      if (pending) broadcast();
+    });
   }
 
   const rest = targets.filter((t) => !concludedIds.has(t.sessionId));

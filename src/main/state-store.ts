@@ -181,6 +181,11 @@ interface SessionRec {
   dangerText?: string;
   /** 停滞の疑いの印（260922_2）。running 以外では持たない */
   stallText?: string;
+  /**
+   * 「返答待ち」にした時刻（260922_4）。confirmKind="question" のときだけ持つ。
+   * 復帰判定（findResumedFromQuestion）の基準時刻で、lastEventAt（Stop を受けた時刻＝表示の起点）とは別
+   */
+  questionSince?: number;
 }
 
 /** 状態遷移に伴う Jev 由来の印の整理（260922_2）: 確認待ち以外では種別・危険度を、実行中以外では停滞を落とす */
@@ -188,6 +193,7 @@ function clearJudgeMarks(rec: SessionRec): void {
   if (rec.state !== "confirm") {
     delete rec.confirmKind;
     delete rec.dangerText;
+    delete rec.questionSince;
   }
   if (rec.state !== "running") delete rec.stallText;
 }
@@ -655,8 +661,28 @@ export class StateStore extends EventEmitter {
     rec.confirmKind = "question";
     rec.lastMessage = "Claude が返答を待っています";
     rec.runningSince = undefined;
+    rec.questionSince = this.now(); // 復帰判定の基準（260922_4）。表示の起点 lastEventAt は Stop のまま
     this.emit("changed");
     return true;
+  }
+
+  /**
+   * 返答待ち（Jev 判定）セッションの一覧（260922_4）。完了・切断と同じ復帰規則
+   * （findResumedFromQuestion）にかけるための掃引対象。権限確認（permission）は含まない
+   */
+  questionPendingSessions(): Array<{ sessionId: string; projectId: string; transcriptPath?: string; stoppedAt: number; pendingSince: number }> {
+    const out: Array<{ sessionId: string; projectId: string; transcriptPath?: string; stoppedAt: number; pendingSince: number }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.state !== "confirm" || rec.confirmKind !== "question" || rec.dead === true) continue;
+      out.push({
+        sessionId: rec.sessionId,
+        projectId: rec.projectId,
+        transcriptPath: rec.transcriptPath,
+        stoppedAt: rec.lastEventAt,
+        pendingSince: rec.questionSince ?? rec.lastEventAt,
+      });
+    }
+    return out;
   }
 
   /** 危険度の印（260922_2）。確認待ち以外には付けない。値が変わったときだけ changed */
