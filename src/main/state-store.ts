@@ -77,9 +77,30 @@ export const WORK_TEXT_MAX = 80;
  */
 export function extractWorkText(prompt: string | undefined): string | undefined {
   if (prompt === undefined) return undefined;
-  const collapsed = prompt.replace(/\s+/g, " ").trim();
+  const collapsed = stripSystemBlocks(prompt).replace(/\s+/g, " ").trim();
   if (collapsed === "") return undefined;
   return collapsed.length > WORK_TEXT_MAX ? collapsed.slice(0, WORK_TEXT_MAX) + "…" : collapsed;
+}
+
+/**
+ * Claude Code が prompt に自動で差し込む枠（260922_5）。ユーザーが書いた依頼文ではないため作業テキストに出さない。
+ * 実データ（2026-09-22 実測）: バックグラウンド作業の完了通知がタイルに `<task-notification> <…` と出ていた。
+ */
+const SYSTEM_BLOCK_TAGS =
+  "task-notification|system-reminder|pasted_content|local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook";
+/** 開始タグ〜対応する終了タグ（貼り付け本文の前後にユーザーの指示があれば、そちらは残す） */
+const PAIRED_BLOCK = new RegExp(`<(${SYSTEM_BLOCK_TAGS})(\\s[^>]*)?>[\\s\\S]*?</\\1>`, "gi");
+/** 終了タグが無い（途中で切れた）開始タグ: そこから末尾まで捨てる */
+const UNCLOSED_BLOCK = new RegExp(`<(${SYSTEM_BLOCK_TAGS})(\\s[^>]*)?>[\\s\\S]*$`, "i");
+/** 取り残された単独タグ */
+const LONE_TAG = new RegExp(`</?(${SYSTEM_BLOCK_TAGS})(\\s[^>]*)?>`, "gi");
+
+/**
+ * システムが差し込んだ枠を落として、ユーザーが書いた部分だけを残す（260922_5）。
+ * 全部が枠だった場合は空文字を返す（呼び出し側は既存の作業テキストを維持する）
+ */
+export function stripSystemBlocks(text: string): string {
+  return text.replace(PAIRED_BLOCK, " ").replace(UNCLOSED_BLOCK, " ").replace(LONE_TAG, " ");
 }
 
 /**
