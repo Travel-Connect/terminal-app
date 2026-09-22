@@ -32,8 +32,11 @@ import {
   dangerState,
   interpretDanger,
   interpretPendingQuestion,
+  interpretNameMatch,
   interpretStall,
   interpretWorkText,
+  nameMatchQuestions,
+  nameMatchState,
   pendingQuestionQuestions,
   pendingQuestionState,
   shouldJudgeWorkText,
@@ -53,6 +56,7 @@ import {
   type StoppedResumeHit,
 } from "./liveness-monitor";
 import { Logger } from "./logger";
+import { runClaudeCli, suggestProjectName } from "./name-suggest";
 import { shouldNotify } from "./notify-policy";
 import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
@@ -328,6 +332,83 @@ async function judgeWorkText(sessionId: string, prompt: string, project: Project
   }
   logger.info(`Jev 作業テキスト判定: ${name} (session=${sessionId}) → ${verdict.replace ? "置き換え" : "前の文を維持"} (is_task=${verdict.p.toFixed(2)})`);
   if (verdict.replace && stateStore.setWorkText(sessionId, prompt)) broadcast();
+}
+
+/** 名前整合の判定記録（260922_6）: sessionId → 最後に判定した「表示名|作業テキスト」。同じ材料では聞き直さない */
+const nameHintJudged = new Map<string, string>();
+
+/**
+ * タイル名と作業内容の整合（260922_6）: 作業テキストを持つセッションごとに、Jev へ
+ * 「表示名がこの作業を表しているか」「表示名が汎用的すぎないか」を聞き、直した方がよいタイルに印を付ける。
+ * 表示名・作業テキストのどちらかが変わったときだけ聞く（掃引ごとの再判定はしない）
+ */
+async function judgeNameHints(): Promise<void> {
+  if (!jev.available) return;
+  const sessions = stateStore.workTextSessions();
+  const live = new Set(sessions.map((s) => s.sessionId));
+  for (const sid of nameHintJudged.keys()) if (!live.has(sid)) nameHintJudged.delete(sid);
+  let changed = false;
+  for (const s of sessions) {
+    const project = projectStore.getProject(s.projectId);
+    if (project === null) continue;
+    const key = `${project.name}|${s.workText}`;
+    if (nameHintJudged.get(s.sessionId) === key) continue;
+    const state = nameMatchState(project.name, path.basename(project.path), s.workText);
+    if (state === null) continue;
+    nameHintJudged.set(s.sessionId, key);
+    const verdict = interpretNameMatch(await jev.judge(state, nameMatchQuestions()));
+    if (verdict === null) continue;
+    if (stateStore.applyNameHint(s.sessionId, verdict.text)) changed = true;
+    logger.info(`Jev 名前整合判定: ${project.name} (session=${s.sessionId}) → ${verdict.text ?? "問題なし"} (${verdict.detail})`);
+  }
+  if (changed) broadcast();
+}
+
+/**
+ * 表示名の提案（260922_6）: Claude Code CLI（sonnet）に短い表示名を作らせ、確認ダイアログを経て適用する。
+ * 判定（Jev）と生成（Claude）の役割分担 — Jev は文章を作れないため、名前の生成は別モデルに任せる
+ */
+async function suggestRename(id: string): Promise<void> {
+  const project = projectStore.getProject(id);
+  if (project === null || win === null || win.isDestroyed()) return;
+  const before = project.name;
+  setStatus(`表示名を考えています（Claude Sonnet）: ${before}`);
+  const works = stateStore
+    .workTextSessions()
+    .filter((s) => s.projectId === id)
+    .map((s) => s.workText);
+  const result = await suggestProjectName({ folderName: path.basename(project.path), currentName: before, works }, project.path, { run: runClaudeCli });
+  if (!result.ok || result.name === undefined) {
+    logger.warn(`表示名の提案に失敗: ${before} — ${result.error ?? "不明"}`);
+    setStatus(`表示名の提案に失敗しました: ${result.error ?? "不明"}`);
+    return;
+  }
+  logger.info(`表示名の提案: ${before} → ${result.name}`);
+  if (win.isDestroyed()) return;
+  const choice = await dialog.showMessageBox(win, {
+    type: "question",
+    title: "表示名の提案（Claude Sonnet）",
+    message: `「${before}」を「${result.name}」に変えますか？`,
+    detail: `フォルダ: ${project.path}
+直近の作業から Claude Sonnet が考えた名前です。あとから右クリック →「表示名を変更…」でも直せます。`,
+    buttons: ["この名前にする", "やめる"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice.response !== 0) {
+    setStatus("表示名の変更をやめました");
+    return;
+  }
+  const renamed = projectStore.renameProject(id, result.name);
+  if (!renamed.ok) {
+    setStatus(`表示名を変更できませんでした: ${renamed.error ?? "不明"}`);
+    return;
+  }
+  stateStore.clearNameHints(id);
+  nameHintJudged.clear(); // 新しい名前で次の掃引に判定し直す
+  logger.info(`表示名変更（AI 提案）: ${before} → ${renamed.name}`);
+  setStatus(`表示名を変更しました: ${before} → ${renamed.name}`);
 }
 
 /** 停滞判定の記録: sessionId → 最後に判定した transcript の活動時刻と判定時刻（同じ材料・短い間隔で聞き直さない） */
@@ -698,6 +779,8 @@ function sweepLiveness(): void {
   const rest = targets.filter((t) => !concludedIds.has(t.sessionId));
   // 停滞の疑い（260922_2）: 実行中セッションの直近の手順を Jev に聞く（非同期。結果は別途配信）
   void judgeStalls(rest);
+  // タイル名と作業内容の整合（260922_6）: 表示名・作業テキストが変わったセッションだけ聞く
+  void judgeNameHints();
   let windows: TopLevelWindow[] | null = null;
   const windowPresent = (projectId: string): boolean | null => {
     const project = projectStore.getProject(projectId);
@@ -1339,6 +1422,7 @@ function wireIpc(): void {
       { type: "separator" },
       { label: "ステータス", submenu: statusItems },
       { label: "表示名を変更…", click: () => { requestRename(id); } },
+      { label: "表示名を AI に提案（Claude Sonnet）", click: () => { void suggestRename(id); } },
       { label: "ウィンドウ位置", submenu: boundsItems },
       { type: "separator" },
       { label: "登録解除（hooks も除去）…", click: () => { void confirmAndUnregister(id); } },
@@ -1370,6 +1454,8 @@ function wireIpc(): void {
     const result = projectStore.renameProject(id, name);
     if (!result.ok) return { ok: false, error: result.error };
     if (result.name !== before) {
+      stateStore.clearNameHints(id); // 名前を直したら整合の印は落とす（260922_6）
+      nameHintJudged.clear();
       logger.info(`表示名変更: ${before} → ${result.name}`);
       setStatus(`表示名を変更しました: ${before} → ${result.name}`);
     } else {

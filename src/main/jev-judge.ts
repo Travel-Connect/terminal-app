@@ -249,3 +249,61 @@ export function interpretStall(answers: JevAnswers | null): StallVerdict | null 
   if (stalled && (noProgress ?? 0) >= STALL_THRESHOLD) return { text: "停滞の疑い・進展なし", detail };
   return { detail };
 }
+
+/* ---------------- 5. タイル名と作業内容の整合（260922_6） ---------------- */
+
+/** 「名前が汎用的で作業を表していない」とみなす下限（実測: dev は 0.98、具体名は 0.08〜0.41） */
+export const NAME_GENERIC_THRESHOLD = 0.8;
+/** 「名前と作業が別物」とみなす上限（実測: 合っている組は 0.7〜0.95） */
+export const NAME_MISMATCH_THRESHOLD = 0.45;
+/** 作業テキストが名前の材料になる（断片・内部マーカー・相槌でない）下限 */
+export const NAME_WORK_TOPIC_MIN = 0.5;
+/** これより短い作業テキストでは判定しない */
+export const NAME_WORK_MIN_CHARS = 6;
+
+export function nameMatchQuestions(): Record<string, JevQuestion> {
+  return {
+    matches: noul(
+      "The task described under 'Current work' plausibly belongs to the project described by 'Display name' and 'Folder name' — " +
+        "they are about the same app, tool or topic. Text may be in Japanese."
+    ),
+    name_generic: noul(
+      "The display name is generic or uninformative as a project label " +
+        "(examples: 'dev', 'test', 'app', 'tmp', 'work', or a bare folder name that says nothing about the project)."
+    ),
+    work_is_topic: noul(
+      "The 'Current work' text is a meaningful description of a task, not a fragment, an internal marker, an acknowledgement, or noise."
+    ),
+  };
+}
+
+/** state 用: 表示名・フォルダ名・作業テキスト。作業テキストが無い・短すぎるときは null（聞かない） */
+export function nameMatchState(displayName: string, folderName: string, workText: string | undefined): string | null {
+  const work = (workText ?? "").trim();
+  if (work.length < NAME_WORK_MIN_CHARS) return null;
+  return `Display name: ${displayName}\nFolder name: ${folderName}\nCurrent work: ${tailClip(work, 300)}`;
+}
+
+export interface NameMatchVerdict {
+  /** タイルに出す短い文言。見直し不要なら undefined */
+  text?: string;
+  /** "generic" = 名前が作業を表していない / "mismatch" = 名前と作業が別物 */
+  reason?: "generic" | "mismatch";
+  detail: string;
+}
+
+export function interpretNameMatch(answers: JevAnswers | null): NameMatchVerdict | null {
+  if (answers === null) return null;
+  const get = (k: string): number | undefined => (answers[k]?.type === "noul" ? (answers[k] as { noul: number }).noul : undefined);
+  const matches = get("matches");
+  const generic = get("name_generic");
+  const topic = get("work_is_topic");
+  if (matches === undefined && generic === undefined) return null;
+  const fmt = (v: number | undefined): string => (v === undefined ? "-" : v.toFixed(2));
+  const detail = `matches=${fmt(matches)} name_generic=${fmt(generic)} work_is_topic=${fmt(topic)}`;
+  // 名前の材料にならない作業テキスト（内部マーカー・相槌）では提案しない
+  if ((topic ?? 0) < NAME_WORK_TOPIC_MIN) return { detail };
+  if ((generic ?? 0) >= NAME_GENERIC_THRESHOLD) return { text: "名前が作業を表していません", reason: "generic", detail };
+  if (matches !== undefined && matches <= NAME_MISMATCH_THRESHOLD) return { text: "名前と作業が一致しません", reason: "mismatch", detail };
+  return { detail };
+}

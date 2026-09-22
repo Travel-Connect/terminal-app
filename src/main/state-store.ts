@@ -202,6 +202,8 @@ interface SessionRec {
   dangerText?: string;
   /** 停滞の疑いの印（260922_2）。running 以外では持たない */
   stallText?: string;
+  /** タイル名と作業内容の不一致の印（260922_6）。状態には依存しない（表示名を直すまで残る） */
+  nameHint?: string;
   /**
    * 「返答待ち」にした時刻（260922_4）。confirmKind="question" のときだけ持つ。
    * 復帰判定（findResumedFromQuestion）の基準時刻で、lastEventAt（Stop を受けた時刻＝表示の起点）とは別
@@ -274,6 +276,7 @@ function toView(rec: SessionRec): SessionView {
   if (rec.confirmKind !== undefined) view.confirmKind = rec.confirmKind;
   if (rec.dangerText !== undefined) view.dangerText = rec.dangerText;
   if (rec.stallText !== undefined) view.stallText = rec.stallText;
+  if (rec.nameHint !== undefined) view.nameHint = rec.nameHint;
   return view;
 }
 
@@ -724,6 +727,41 @@ export class StateStore extends EventEmitter {
     else rec.stallText = text;
     this.emit("changed");
     return true;
+  }
+
+  /**
+   * タイル名と作業内容の不一致の印（260922_6）。状態を問わず付け外しでき、値が変わったときだけ changed。
+   * 表示名を直したら呼び出し側が clearNameHints で消す
+   */
+  applyNameHint(sessionId: string, text: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.nameHint === text) return false;
+    if (text === undefined) delete rec.nameHint;
+    else rec.nameHint = text;
+    this.emit("changed");
+    return true;
+  }
+
+  /** 指定プロジェクトの全セッションから名前の印を消す（260922_6。表示名を変えた直後に呼ぶ） */
+  clearNameHints(projectId: string): boolean {
+    let changed = false;
+    for (const rec of this.sessions.values()) {
+      if (rec.projectId !== projectId || rec.nameHint === undefined) continue;
+      delete rec.nameHint;
+      changed = true;
+    }
+    if (changed) this.emit("changed");
+    return changed;
+  }
+
+  /** 名前の整合判定に使う「セッションごとの作業テキスト」（260922_6） */
+  workTextSessions(): Array<{ sessionId: string; projectId: string; workText: string }> {
+    const out: Array<{ sessionId: string; projectId: string; workText: string }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true || rec.workText === undefined || rec.workText === "") continue;
+      out.push({ sessionId: rec.sessionId, projectId: rec.projectId, workText: rec.workText });
+    }
+    return out;
   }
 
   /** 切断検知の掃引対象 = 「実行中」セッション一覧（liveness-monitor 用。260712_2） */

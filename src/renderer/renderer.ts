@@ -151,11 +151,15 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const alert = document.createElement("span");
   alert.className = "tile-alert";
   alert.hidden = true;
+  // 名前の見直し提案（260922_6）: Jev が「表示名が作業を表していない」と判定したタイルに出す
+  const nameHint = document.createElement("span");
+  nameHint.className = "tile-name-hint";
+  nameHint.hidden = true;
   loop.hidden = true;
   const badgeRow = document.createElement("span");
   badgeRow.className = "tile-badge-row";
   badgeRow.hidden = true;
-  badgeRow.append(badge, loop, alert);
+  badgeRow.append(badge, loop, alert, nameHint);
   head.append(nameRow, badgeRow);
   const center = document.createElement("span");
   center.className = "tile-center";
@@ -395,8 +399,17 @@ function renderGrid(): void {
       alertEl.title = alert;
     }
     alertEl.hidden = alert === "";
+    // 名前の見直し提案（260922_6）。右クリックの「表示名を AI に提案」への導線を hover で案内する
+    const hintEl = el.querySelector(".tile-name-hint") as HTMLElement;
+    const nameHint = session?.nameHint ?? "";
+    const hintLabel = nameHint === "" ? "" : `✎ ${nameHint}`;
+    if (hintEl.textContent !== hintLabel) {
+      hintEl.textContent = hintLabel;
+      hintEl.title = nameHint === "" ? "" : `${nameHint}（右クリック →「表示名を AI に提案」で直せます）`;
+    }
+    hintEl.hidden = hintLabel === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
-    badgeRowEl.hidden = badge === "" && loop === "" && alert === "";
+    badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "";
     const icon = STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）

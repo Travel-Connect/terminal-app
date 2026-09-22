@@ -251,6 +251,23 @@ body {
   text-overflow: ellipsis;
 }
 
+/* 名前の見直し提案（260922_6）: Jev が名前と作業の不一致を検知したタイル。危険（赤）より弱い黄で出す */
+.tile-name-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(234, 179, 8, 0.8);
+  background: rgba(234, 179, 8, 0.14);
+  color: #ca8a04;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ループ進捗バッジ（260907_2）: eval-loop の state 由来。アクセント色で手動バッジ（灰色）と区別する */
 .tile-loop {
   flex: 0 1 auto;
