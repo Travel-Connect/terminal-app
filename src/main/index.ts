@@ -62,6 +62,7 @@ import { getDataDir } from "./paths";
 import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
+import { loadSessionSnapshot, reconcileSnapshot, saveSessionSnapshot, type SnapshotEntry } from "./session-snapshot";
 import { activityMtimeMs, blockedStopOf, lastAssistantTextOf, lastToolUseOf, recentStepsOf, scanLiveSessions, selectRestorable, turnEndOf } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
@@ -150,6 +151,7 @@ function buildSnapshot(): Snapshot {
 
 function broadcast(receivedAt?: number): void {
   revision += 1;
+  scheduleSessionSnapshot(); // 変化を間引いてディスクへ（260922_7: 再起動後に続きから見えるように）
   const canDeliver = win !== null && !win.isDestroyed();
   // 配信できない revision の計測開始点は記録しない（notify-rendered が来ず Map が育ち続けるのを防ぐ）
   if (receivedAt !== undefined && canDeliver) pendingRender.set(revision, receivedAt);
@@ -954,6 +956,67 @@ async function judgePendingForRestored(sessionIds: readonly string[], project: P
   return pending;
 }
 
+/* ---------------- セッション表示の保存・復元（260922_7） ---------------- */
+
+/** 保存の間引き: 変化のたびに書かず、この間隔でまとめて書く */
+const SNAPSHOT_SAVE_INTERVAL_MS = 3_000;
+let snapshotSaveTimer: NodeJS.Timeout | null = null;
+
+/** 保存用の 1 件に transcript の更新時刻を添える（復元時に「進んだか」を見るため） */
+function snapshotEntries(): SnapshotEntry[] {
+  return stateStore.exportSessions().map((rec) => {
+    const entry: SnapshotEntry = { ...rec };
+    if (rec.transcriptPath !== undefined) {
+      const m = statMtimeMs(rec.transcriptPath);
+      if (m !== null) entry.transcriptMtimeMs = m;
+    }
+    return entry;
+  });
+}
+
+function writeSessionSnapshot(): void {
+  if (demoMode) return; // デモは一時データディレクトリ。実運用の記録を汚さない
+  try {
+    saveSessionSnapshot(getDataDir(), snapshotEntries(), Date.now());
+  } catch (e) {
+    logger.warn(`セッション表示の保存に失敗（続行）: ${String(e)}`);
+  }
+}
+
+/** 変化のたびに呼ばれる。実際の書き込みは SNAPSHOT_SAVE_INTERVAL_MS でまとめる */
+function scheduleSessionSnapshot(): void {
+  if (demoMode || snapshotSaveTimer !== null) return;
+  snapshotSaveTimer = setTimeout(() => {
+    snapshotSaveTimer = null;
+    writeSessionSnapshot();
+  }, SNAPSHOT_SAVE_INTERVAL_MS);
+}
+
+/**
+ * 起動直後: 前回の表示を実データと突き合わせて取り込む（260922_7）。
+ * これにより権限確認の「確認待ち」や Jev の判定結果（返答待ち・危険度・停滞・名前の印）が再起動後も残り、
+ * 続きから確認できる。進んでいたセッションは終端分類で作り直す
+ */
+function restoreSessionSnapshot(): number {
+  if (demoMode) return 0;
+  const file = loadSessionSnapshot(getDataDir(), Date.now());
+  if (file === null) return 0;
+  const registry = readSessionRegistry();
+  const result = reconcileSnapshot(file.sessions, {
+    now: () => Date.now(),
+    projectExists: (id) => projectStore.getProject(id) !== null,
+    liveness: (sid) => classifyLiveness(registry, sid),
+    mtimeMs: statMtimeMs,
+    turnEnd: turnEndOf,
+  });
+  const added = stateStore.importSessions(result.keep);
+  logger.info(
+    `前回の表示を復元: 保存 ${file.sessions.length} 件 → 取り込み ${added} 件` +
+      `（作り直し ${result.refreshed}・登録なし ${result.dropped.project}・終了済み ${result.dropped.dead}）`
+  );
+  return added;
+}
+
 /**
  * 起動時復元（260922_3）: セッション表示はメモリ上だけなので、再起動直後は全タイルが「待機」になる。
  * 登録済み全プロジェクトの transcript を走査して、登録簿で生きているセッションを「完了」「実行中」で復元し、
@@ -1652,6 +1715,7 @@ void app.whenReady().then(async () => {
   );
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
+    restoreSessionSnapshot(); // 前回の表示を復元（260922_7）— transcript 走査より先に取り込み、続きから見えるようにする
     void restoreSessionsAtStartup(); // 起動時復元（260922_3）: 待機になった全タイルを transcript と登録簿から復元し、Jev で返答待ちを拾う
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
     // 未接続タイル（260903_1）: 起動直後に 1 回判定し、以後は約 5 秒ごとに更新（変化時のみ配信）
@@ -1665,6 +1729,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  if (snapshotSaveTimer !== null) clearTimeout(snapshotSaveTimer);
+  writeSessionSnapshot(); // 次回起動で続きから見えるように最後の状態を残す（260922_7）
   if (livenessTimer !== null) clearInterval(livenessTimer);
   if (windowPollTimer !== null) clearInterval(windowPollTimer);
   cancelAllPendingRestores();

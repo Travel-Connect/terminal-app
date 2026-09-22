@@ -175,6 +175,27 @@ export function matchProjectByCwd(cwd: string, projects: readonly Project[]): Pr
   return best;
 }
 
+/**
+ * 再起動をまたいで持ち越すセッション記録（260922_7）。
+ * 表示に必要な値に加えて、判定を続けるための内部項目（transcriptPath・questionSince）を含む
+ */
+export interface PersistedSession {
+  sessionId: string;
+  projectId: string;
+  state: SessionState;
+  lastEventAt: number;
+  firstSeenAt: number;
+  runningSince?: number;
+  lastMessage?: string;
+  workText?: string;
+  transcriptPath?: string;
+  confirmKind?: "permission" | "question";
+  dangerText?: string;
+  stallText?: string;
+  nameHint?: string;
+  questionSince?: number;
+}
+
 interface SessionRec {
   sessionId: string;
   projectId: string;
@@ -795,6 +816,68 @@ export class StateStore extends EventEmitter {
   seedSession(rec: SessionView): void {
     this.sessions.set(rec.sessionId, { ...rec, firstSeenAt: rec.firstSeenAt ?? rec.runningSince ?? rec.lastEventAt });
     this.emit("changed");
+  }
+
+  /* ---------------- 再起動をまたぐ保存・復元（260922_7） ---------------- */
+
+  /**
+   * 保存用のセッション一覧（260922_7）。終了済み（dead）は除く。
+   * SessionView には載らない内部項目（transcriptPath・questionSince）も含めて、再起動後に判定を続けられるようにする
+   */
+  exportSessions(): PersistedSession[] {
+    const out: PersistedSession[] = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true) continue;
+      const item: PersistedSession = {
+        sessionId: rec.sessionId,
+        projectId: rec.projectId,
+        state: rec.state,
+        lastEventAt: rec.lastEventAt,
+        firstSeenAt: rec.firstSeenAt,
+      };
+      if (rec.runningSince !== undefined) item.runningSince = rec.runningSince;
+      if (rec.lastMessage !== undefined) item.lastMessage = rec.lastMessage;
+      if (rec.workText !== undefined) item.workText = rec.workText;
+      if (rec.transcriptPath !== undefined) item.transcriptPath = rec.transcriptPath;
+      if (rec.confirmKind !== undefined) item.confirmKind = rec.confirmKind;
+      if (rec.dangerText !== undefined) item.dangerText = rec.dangerText;
+      if (rec.stallText !== undefined) item.stallText = rec.stallText;
+      if (rec.nameHint !== undefined) item.nameHint = rec.nameHint;
+      if (rec.questionSince !== undefined) item.questionSince = rec.questionSince;
+      out.push(item);
+    }
+    return out;
+  }
+
+  /**
+   * 保存しておいたセッションを取り込む（260922_7。起動直後に 1 回だけ呼ぶ想定）。
+   * 既にイベントで確立している同じ id は上書きしない（実データの方が新しい）。戻り値: 取り込んだ件数
+   */
+  importSessions(list: readonly PersistedSession[]): number {
+    let added = 0;
+    for (const item of list) {
+      if (this.sessions.has(item.sessionId)) continue;
+      const rec: SessionRec = {
+        sessionId: item.sessionId,
+        projectId: item.projectId,
+        state: item.state,
+        lastEventAt: item.lastEventAt,
+        firstSeenAt: item.firstSeenAt,
+      };
+      if (item.runningSince !== undefined) rec.runningSince = item.runningSince;
+      if (item.lastMessage !== undefined) rec.lastMessage = item.lastMessage;
+      if (item.workText !== undefined) rec.workText = item.workText;
+      if (item.transcriptPath !== undefined) rec.transcriptPath = item.transcriptPath;
+      if (item.confirmKind !== undefined) rec.confirmKind = item.confirmKind;
+      if (item.dangerText !== undefined) rec.dangerText = item.dangerText;
+      if (item.stallText !== undefined) rec.stallText = item.stallText;
+      if (item.nameHint !== undefined) rec.nameHint = item.nameHint;
+      if (item.questionSince !== undefined) rec.questionSince = item.questionSince;
+      this.sessions.set(rec.sessionId, rec);
+      added += 1;
+    }
+    if (added > 0) this.emit("changed");
+    return added;
   }
 
   /** 全消去（揮発仕様の明示。T-10: 再起動で全タイル「待機」へ） */
