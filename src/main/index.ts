@@ -63,7 +63,17 @@ import { resolveProjectRoot } from "./project-root";
 import { ProjectStore, validateProjectDir } from "./project-store";
 import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryEntry } from "./session-registry";
 import { loadSessionSnapshot, reconcileSnapshot, saveSessionSnapshot, type SnapshotEntry } from "./session-snapshot";
-import { activityMtimeMs, blockedStopOf, lastAssistantTextOf, lastToolUseOf, recentStepsOf, scanLiveSessions, selectRestorable, turnEndOf } from "./session-scan";
+import {
+  activityMtimeMs,
+  blockedStopOf,
+  lastAssistantTextOf,
+  lastToolUseOf,
+  recentStepsOf,
+  scanLiveSessions,
+  selectRestorable,
+  subagentMtimeMs,
+  turnEndOf,
+} from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
 import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
@@ -200,6 +210,8 @@ const lastNotifiedState = new Map<string, SessionState>();
  * まだ作業中なら「実行中」へ戻す。完了トーストはこの判定の後に出す（誤通知の防止）
  */
 const pendingStopChecks = new Map<string, NodeJS.Timeout>();
+/** サブエージェント待ちのタイルに出す文言（260922_8） */
+const BG_AGENT_TEXT = "サブエージェント待ち";
 /** Stop 受信 → 前倒し判定までの待ち = 登録簿が idle へ切り替わる猶予（STOPPED_RESUME_MIN_AGE_MS）＋余裕 */
 const STOP_RECHECK_DELAY_MS = STOPPED_RESUME_MIN_AGE_MS + 500;
 
@@ -223,6 +235,7 @@ function stoppedResumeDeps(registry: RegistryEntry[] | null): StoppedResumeDeps 
     turnEnd: turnEndOf,
     blockedStop: blockedStopOf,
     activityMtimeMs,
+    subagentMtimeMs, // サブエージェント待ちの判定（260922_8）
   };
 }
 
@@ -239,7 +252,10 @@ function applyStoppedResume(hit: StoppedResumeHit): boolean {
       ? "登録簿 status=busy（Claude Code は作業中と申告）"
       : hit.reason === "blocked-stop"
         ? `Stop hook が続行を指示${label !== undefined ? ` ${label}` : ""}`
-        : "切断後に transcript（本体または subagent 記録）が更新";
+        : hit.reason === "subagent"
+          ? "サブエージェントが作業中（subagent 記録が Stop より後に更新）"
+          : "切断後に transcript（本体または subagent 記録）が更新";
+  if (hit.reason === "subagent") stateStore.applyBgText(sid, BG_AGENT_TEXT);
   logger.info(`${from}から実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${sid}) — ${why}`);
   return true;
 }
@@ -290,7 +306,16 @@ async function judgePendingQuestion(sessionId: string, project: Project | null):
   const verdict = interpretPendingQuestion(await jev.judge(state, pendingQuestionQuestions()));
   if (verdict === null) return false;
   const name = project?.name ?? "?";
-  logger.info(`Jev 返答待ち判定: ${name} (session=${sessionId}) → ${verdict.pending ? "返答待ち" : "完了のまま"} (${verdict.detail})`);
+  const label = verdict.pending ? "返答待ち" : verdict.background ? "サブエージェント待ち（実行中へ）" : "完了のまま";
+  logger.info(`Jev 返答待ち判定: ${name} (session=${sessionId}) → ${label} (${verdict.detail})`);
+  // 裏でエージェントが動いていると書いてあれば「実行中」に戻す（260922_8）
+  if (verdict.background) {
+    if (stateStore.resumeFromStopped(sessionId)) {
+      stateStore.applyBgText(sessionId, BG_AGENT_TEXT);
+      lastNotifiedState.set(sessionId, "running");
+    }
+    return false;
+  }
   if (!verdict.pending) return false;
   // 適用直前の再確認（260922_4）: 判定を待つ間に作業が再開していたら「返答待ち」にしない。
   // 登録簿 busy（Claude Code 自身の申告）／transcript 終端が open（ターン継続中）が根拠
@@ -732,6 +757,7 @@ function sweepLiveness(): void {
       registryStatus: (sid) => registryStatusOf(registry, sid),
       turnEnd: turnEndOf,
       blockedStop: blockedStopOf,
+      subagentMtimeMs, // サブエージェント待ち（260922_8）
     });
     for (const hit of hits) {
       if (!stateStore.resumeFromConfirm(hit.target.sessionId)) continue;
@@ -743,7 +769,10 @@ function sweepLiveness(): void {
           ? "登録簿 status=busy"
           : hit.reason === "blocked-stop"
             ? "Stop hook が続行を指示"
-            : "ターンが再開（transcript 終端が open）";
+            : hit.reason === "subagent"
+              ? "サブエージェントが作業中"
+              : "ターンが再開（transcript 終端が open）";
+      if (hit.reason === "subagent") stateStore.applyBgText(hit.target.sessionId, BG_AGENT_TEXT);
       logger.info(`返答待ちから実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${why}`);
     }
   }

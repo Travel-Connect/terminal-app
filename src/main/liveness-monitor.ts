@@ -68,6 +68,12 @@ export const STOPPED_RESUME_MIN_AGE_MS = envMs("TERMINAL_APP_STOPPED_RESUME_MIN_
  */
 export const BLOCKED_STOP_MARGIN_MS = 2_000;
 
+/**
+ * サブエージェント（バックグラウンドエージェント）待ちと判定する余裕（260922_8）。
+ * Stop の直前に終わった subagent の書き込みを「まだ動いている」と誤認しないための下駄
+ */
+export const SUBAGENT_RESUME_MARGIN_MS = 3_000;
+
 export interface ConfirmTarget extends SweepTarget {
   /** 確認待ちへ遷移したイベントの時刻（epoch ms） */
   lastEventAt: number;
@@ -140,12 +146,17 @@ export interface StoppedResumeDeps {
   blockedStop(path: string, sinceMs: number): BlockedStop | null;
   /** 本体 transcript と subagent 記録の新しい方の mtime（session-scan.activityMtimeMs を注入）。取得不可は null */
   activityMtimeMs(path: string): number | null;
+  /**
+   * subagent 記録だけの mtime（session-scan.subagentMtimeMs を注入。260922_8）。
+   * 省略時は常に null = サブエージェント待ちの判定をしない（既存呼び出しとの互換）
+   */
+  subagentMtimeMs?(path: string): number | null;
 }
 
 export interface StoppedResumeHit {
   target: StoppedTarget;
-  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / Stop hook が続行を指示 / 切断後に transcript 更新 */
-  reason: "registry" | "blocked-stop" | "transcript";
+  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / Stop hook が続行を指示 / 切断後に transcript 更新 / サブエージェントが作業中 */
+  reason: "registry" | "blocked-stop" | "transcript" | "subagent";
   /** reason=blocked-stop のとき: block 理由（作業テキストのラベルに使う） */
   blockReason?: string;
 }
@@ -181,6 +192,14 @@ export function findResumedFromStopped(targets: readonly StoppedTarget[], deps: 
     const blocked = deps.blockedStop(t.transcriptPath, t.lastEventAt - BLOCKED_STOP_MARGIN_MS);
     if (blocked !== null) {
       out.push({ target: t, reason: "blocked-stop", blockReason: blocked.reason });
+      continue;
+    }
+    // R5 サブエージェント待ち（260922_8）: 本体が終わっていても subagent 記録が Stop・切断より後に
+    // 更新されていれば、バックグラウンドエージェントが作業中 = まだ「実行中」。
+    // 本体 transcript は見ない（Stop 直後の後片付けを拾ってしまうため）
+    const sub = deps.subagentMtimeMs?.(t.transcriptPath) ?? null;
+    if (sub !== null && sub > t.lastEventAt + SUBAGENT_RESUME_MARGIN_MS) {
+      out.push({ target: t, reason: "subagent" });
       continue;
     }
     if (t.state === "disconnected") {
@@ -255,6 +274,8 @@ export interface QuestionTarget extends SweepTarget {
 
 export interface QuestionResumeDeps {
   now(): number;
+  /** subagent 記録だけの mtime（260922_8）。省略時は判定しない */
+  subagentMtimeMs?(path: string): number | null;
   /** Claude Code の登録簿 status（busy / waiting / idle）。無ければ undefined */
   registryStatus(sessionId: string): string | undefined;
   /** transcript 終端の分類（session-scan.turnEndOf を注入） */
@@ -265,8 +286,8 @@ export interface QuestionResumeDeps {
 
 export interface QuestionResumeHit {
   target: QuestionTarget;
-  /** 何を根拠に戻したか: 登録簿が busy / Stop hook が続行を指示 / ターンが再開している */
-  reason: "registry" | "blocked-stop" | "turn-open";
+  /** 何を根拠に戻したか: 登録簿が busy / Stop hook が続行を指示 / ターンが再開 / サブエージェントが作業中 */
+  reason: "registry" | "blocked-stop" | "turn-open" | "subagent";
   blockReason?: string;
 }
 
@@ -299,7 +320,13 @@ export function findResumedFromQuestion(targets: readonly QuestionTarget[], deps
       out.push({ target: t, reason: "blocked-stop", blockReason: blocked.reason });
       continue;
     }
-    if (turn === "open") out.push({ target: t, reason: "turn-open" });
+    if (turn === "open") {
+      out.push({ target: t, reason: "turn-open" });
+      continue;
+    }
+    // サブエージェント待ち（260922_8）: 返答を待っているように見えても、裏でエージェントが動いていれば作業中
+    const sub = deps.subagentMtimeMs?.(t.transcriptPath) ?? null;
+    if (sub !== null && sub > t.stoppedAt + SUBAGENT_RESUME_MARGIN_MS) out.push({ target: t, reason: "subagent" });
   }
   return out;
 }

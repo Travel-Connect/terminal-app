@@ -193,6 +193,7 @@ export interface PersistedSession {
   dangerText?: string;
   stallText?: string;
   nameHint?: string;
+  bgText?: string;
   questionSince?: number;
 }
 
@@ -225,6 +226,8 @@ interface SessionRec {
   stallText?: string;
   /** タイル名と作業内容の不一致の印（260922_6）。状態には依存しない（表示名を直すまで残る） */
   nameHint?: string;
+  /** サブエージェント待ちの印（260922_8）。running 以外では持たない */
+  bgText?: string;
   /**
    * 「返答待ち」にした時刻（260922_4）。confirmKind="question" のときだけ持つ。
    * 復帰判定（findResumedFromQuestion）の基準時刻で、lastEventAt（Stop を受けた時刻＝表示の起点）とは別
@@ -239,7 +242,10 @@ function clearJudgeMarks(rec: SessionRec): void {
     delete rec.dangerText;
     delete rec.questionSince;
   }
-  if (rec.state !== "running") delete rec.stallText;
+  if (rec.state !== "running") {
+    delete rec.stallText;
+    delete rec.bgText;
+  }
 }
 
 /**
@@ -298,6 +304,7 @@ function toView(rec: SessionRec): SessionView {
   if (rec.dangerText !== undefined) view.dangerText = rec.dangerText;
   if (rec.stallText !== undefined) view.stallText = rec.stallText;
   if (rec.nameHint !== undefined) view.nameHint = rec.nameHint;
+  if (rec.bgText !== undefined) view.bgText = rec.bgText;
   return view;
 }
 
@@ -740,6 +747,19 @@ export class StateStore extends EventEmitter {
     return true;
   }
 
+  /**
+   * サブエージェント待ちの印（260922_8）。実行中にだけ付ける（他の状態では意味が無い）。
+   * 値が変わったときだけ changed
+   */
+  applyBgText(sessionId: string, text: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.state !== "running" || rec.bgText === text) return false;
+    if (text === undefined) delete rec.bgText;
+    else rec.bgText = text;
+    this.emit("changed");
+    return true;
+  }
+
   /** 停滞の疑いの印（260922_2）。実行中以外には付けない。値が変わったときだけ changed */
   applyStallText(sessionId: string, text: string | undefined): boolean {
     const rec = this.sessions.get(sessionId);
@@ -843,6 +863,7 @@ export class StateStore extends EventEmitter {
       if (rec.dangerText !== undefined) item.dangerText = rec.dangerText;
       if (rec.stallText !== undefined) item.stallText = rec.stallText;
       if (rec.nameHint !== undefined) item.nameHint = rec.nameHint;
+      if (rec.bgText !== undefined) item.bgText = rec.bgText;
       if (rec.questionSince !== undefined) item.questionSince = rec.questionSince;
       out.push(item);
     }
@@ -872,6 +893,7 @@ export class StateStore extends EventEmitter {
       if (item.dangerText !== undefined) rec.dangerText = item.dangerText;
       if (item.stallText !== undefined) rec.stallText = item.stallText;
       if (item.nameHint !== undefined) rec.nameHint = item.nameHint;
+      if (item.bgText !== undefined) rec.bgText = item.bgText;
       if (item.questionSince !== undefined) rec.questionSince = item.questionSince;
       this.sessions.set(rec.sessionId, rec);
       added += 1;

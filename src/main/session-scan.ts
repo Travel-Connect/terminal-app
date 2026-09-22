@@ -460,3 +460,31 @@ export function selectRestorable<T extends { sessionId: string; mtimeMs: number 
     return now - s.mtimeMs <= fallbackActiveMs;
   });
 }
+
+/**
+ * subagent 記録（`<transcript のベース名>/subagents/agent-*.jsonl`）だけの最終更新時刻（260922_8）。
+ * 本体 transcript は見ない — Stop の直後にも本体には後片付け（stop_hook_summary・turn_duration・メタ）が
+ * 書かれるため、「完了したのに裏で作業が続いている」の判定材料には使えない。
+ * 記録が無い・読めないときは null
+ */
+export function subagentMtimeMs(transcriptPath: string): number | null {
+  const base = transcriptPath.endsWith(".jsonl") ? transcriptPath.slice(0, -".jsonl".length) : transcriptPath;
+  const subDir = path.join(base, "subagents");
+  let names: string[];
+  try {
+    names = fs.readdirSync(subDir);
+  } catch {
+    return null;
+  }
+  let latest: number | null = null;
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    try {
+      const m = fs.statSync(path.join(subDir, name)).mtimeMs;
+      if (latest === null || m > latest) latest = m;
+    } catch {
+      /* 個別の stat 失敗は無視 */
+    }
+  }
+  return latest;
+}

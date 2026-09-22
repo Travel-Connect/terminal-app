@@ -251,6 +251,23 @@ body {
   text-overflow: ellipsis;
 }
 
+/* サブエージェント待ち（260922_8）: ループ進捗バッジと同系の青。作業が続いていることを示す */
+.tile-bg {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.7);
+  background: rgba(96, 165, 250, 0.1);
+  color: var(--accent);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 名前の見直し提案（260922_6）: Jev が名前と作業の不一致を検知したタイル。危険（赤）より弱い黄で出す */
 .tile-name-hint {
   flex: 0 1 auto;

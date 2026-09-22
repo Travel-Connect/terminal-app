@@ -36,6 +36,8 @@ const noul = (instructions: string): JevQuestion => ({ type: "noul", instruction
 export const PENDING_QUESTION_THRESHOLD = 0.7;
 /** これより短い返答は判定しない（「了解」等の相槌に質問は無い） */
 export const PENDING_QUESTION_MIN_CHARS = 12;
+/** 「バックグラウンドのエージェントに任せて待っている」とみなす下限（260922_8） */
+export const BACKGROUND_DELEGATION_THRESHOLD = 0.7;
 
 export function pendingQuestionQuestions(): Record<string, JevQuestion> {
   return {
@@ -52,11 +54,21 @@ export function pendingQuestionQuestions(): Record<string, JevQuestion> {
       "The message explicitly asks the user for permission or approval to perform a specific action before doing it " +
         "(e.g. 'May I delete...', 'Should I proceed with...', '実行してよいですか')."
     ),
+    delegated_background: noul(
+      "The assistant has handed the remaining work to a background agent, subagent, or another process that is still running, " +
+        "and is waiting for that work to finish rather than waiting for the user " +
+        "(e.g. 'Backgrounded agent', 'waiting for 1 background agent to finish', 'エージェントに投げました', '完了通知が来たら')."
+    ),
   };
 }
 
 export interface PendingQuestionVerdict {
   pending: boolean;
+  /**
+   * バックグラウンドのエージェントに任せて待っている（260922_8）。
+   * true なら「完了」でも「返答待ち」でもなく「実行中（サブエージェント待ち）」にする
+   */
+  background: boolean;
   /** asks_user の確率（ログ用） */
   p: number;
   /** 判定の要約（ログ用） */
@@ -76,10 +88,18 @@ export function interpretPendingQuestion(answers: JevAnswers | null): PendingQue
   if (asks === undefined) return null;
   const report = answers.is_report?.type === "noul" ? answers.is_report.noul : 0;
   const perm = answers.wants_permission?.type === "noul" ? answers.wants_permission.noul : 0;
+  const bg = answers.delegated_background?.type === "noul" ? answers.delegated_background.noul : 0;
   // 質問または許可依頼が強く、かつ「完了報告」の方が強くない → 返答待ち
   const signal = Math.max(asks, perm);
   const pending = signal >= PENDING_QUESTION_THRESHOLD && signal > report;
-  return { pending, p: signal, detail: `asks_user=${asks.toFixed(2)} wants_permission=${perm.toFixed(2)} is_report=${report.toFixed(2)}` };
+  // 返答待ちでないとき、裏でエージェントが動いていると書いてあれば「実行中（サブエージェント待ち）」（260922_8）
+  const background = !pending && bg >= BACKGROUND_DELEGATION_THRESHOLD;
+  return {
+    pending,
+    background,
+    p: signal,
+    detail: `asks_user=${asks.toFixed(2)} wants_permission=${perm.toFixed(2)} is_report=${report.toFixed(2)} delegated_background=${bg.toFixed(2)}`,
+  };
 }
 
 /* ---------------- 2. 確認待ちの危険度 ---------------- */

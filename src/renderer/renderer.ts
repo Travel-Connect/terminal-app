@@ -147,6 +147,10 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   // ループ進捗バッジ（260907_2）: 手動バッジと同じ行に並べる。両方無いときは行ごと隠してレイアウトを崩さない
   const loop = document.createElement("span");
   loop.className = "tile-loop";
+  // サブエージェント待ち（260922_8）: 本体は止まっているが裏でエージェントが動いている間の説明
+  const bg = document.createElement("span");
+  bg.className = "tile-bg";
+  bg.hidden = true;
   // 注意印（260922_2）: 確認待ちの危険度／実行中の停滞の疑い（Jev 判定）。無いときは hidden
   const alert = document.createElement("span");
   alert.className = "tile-alert";
@@ -159,7 +163,7 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const badgeRow = document.createElement("span");
   badgeRow.className = "tile-badge-row";
   badgeRow.hidden = true;
-  badgeRow.append(badge, loop, alert, nameHint);
+  badgeRow.append(badge, loop, alert, nameHint, bg);
   head.append(nameRow, badgeRow);
   const center = document.createElement("span");
   center.className = "tile-center";
@@ -408,8 +412,16 @@ function renderGrid(): void {
       hintEl.title = nameHint === "" ? "" : `${nameHint}（右クリック →「表示名を AI に提案」で直せます）`;
     }
     hintEl.hidden = hintLabel === "";
+    // サブエージェント待ち（260922_8）。実行中のセッションにだけ付く
+    const bgEl = el.querySelector(".tile-bg") as HTMLElement;
+    const bgText = session?.bgText ?? "";
+    if (bgEl.textContent !== bgText) {
+      bgEl.textContent = bgText;
+      bgEl.title = bgText === "" ? "" : `${bgText}（本体の応答は終わっていますが、バックグラウンドのエージェントが動いています）`;
+    }
+    bgEl.hidden = bgText === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
-    badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "";
+    badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "" && bgText === "";
     const icon = STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）
