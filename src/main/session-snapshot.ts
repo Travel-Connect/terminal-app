@@ -134,6 +134,7 @@ export function reconcileSnapshot(entries: readonly SnapshotEntry[], deps: Recon
     if (rec.workText !== undefined) next.workText = rec.workText;
     if (rec.transcriptPath !== undefined) next.transcriptPath = rec.transcriptPath;
     if (rec.nameHint !== undefined) next.nameHint = rec.nameHint; // 名前の印は状態に依存しないので残す
+    if (rec.taskTitle !== undefined) next.taskTitle = rec.taskTitle; // タスク名も状態に依存しない
     keep.push(next);
   }
   return { keep, dropped, refreshed };

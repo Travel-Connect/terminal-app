@@ -194,6 +194,7 @@ export interface PersistedSession {
   stallText?: string;
   nameHint?: string;
   bgText?: string;
+  taskTitle?: string;
   questionSince?: number;
 }
 
@@ -228,6 +229,8 @@ interface SessionRec {
   nameHint?: string;
   /** サブエージェント待ちの印（260922_8）。running 以外では持たない */
   bgText?: string;
+  /** 今やっているタスク（260922_10。transcript の ai-title 由来。状態には依存しない） */
+  taskTitle?: string;
   /**
    * 「返答待ち」にした時刻（260922_4）。confirmKind="question" のときだけ持つ。
    * 復帰判定（findResumedFromQuestion）の基準時刻で、lastEventAt（Stop を受けた時刻＝表示の起点）とは別
@@ -305,6 +308,7 @@ function toView(rec: SessionRec): SessionView {
   if (rec.stallText !== undefined) view.stallText = rec.stallText;
   if (rec.nameHint !== undefined) view.nameHint = rec.nameHint;
   if (rec.bgText !== undefined) view.bgText = rec.bgText;
+  if (rec.taskTitle !== undefined) view.taskTitle = rec.taskTitle;
   return view;
 }
 
@@ -748,6 +752,19 @@ export class StateStore extends EventEmitter {
   }
 
   /**
+   * 今やっているタスク（260922_10）。状態を問わず付け外しでき、値が変わったときだけ changed。
+   * 情報源は Claude Code が書く ai-title なので、こちらからは生成しない
+   */
+  applyTaskTitle(sessionId: string, title: string | undefined): boolean {
+    const rec = this.sessions.get(sessionId);
+    if (rec === undefined || rec.taskTitle === title) return false;
+    if (title === undefined) delete rec.taskTitle;
+    else rec.taskTitle = title;
+    this.emit("changed");
+    return true;
+  }
+
+  /**
    * サブエージェント待ちの印（260922_8）。実行中にだけ付ける（他の状態では意味が無い）。
    * 値が変わったときだけ changed
    */
@@ -793,6 +810,26 @@ export class StateStore extends EventEmitter {
     }
     if (changed) this.emit("changed");
     return changed;
+  }
+
+  /** transcript を持つ生存セッション（260922_10。タスク名の読み取り対象） */
+  transcriptSessions(): Array<{ sessionId: string; projectId: string; transcriptPath: string }> {
+    const out: Array<{ sessionId: string; projectId: string; transcriptPath: string }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true || rec.transcriptPath === undefined) continue;
+      out.push({ sessionId: rec.sessionId, projectId: rec.projectId, transcriptPath: rec.transcriptPath });
+    }
+    return out;
+  }
+
+  /** タスク名を持つセッション（260922_10。自動リネームの材料） */
+  taskTitles(): Array<{ sessionId: string; projectId: string; taskTitle: string }> {
+    const out: Array<{ sessionId: string; projectId: string; taskTitle: string }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true || rec.taskTitle === undefined) continue;
+      out.push({ sessionId: rec.sessionId, projectId: rec.projectId, taskTitle: rec.taskTitle });
+    }
+    return out;
   }
 
   /** 名前の整合判定に使う「セッションごとの作業テキスト」（260922_6） */
@@ -864,6 +901,7 @@ export class StateStore extends EventEmitter {
       if (rec.stallText !== undefined) item.stallText = rec.stallText;
       if (rec.nameHint !== undefined) item.nameHint = rec.nameHint;
       if (rec.bgText !== undefined) item.bgText = rec.bgText;
+      if (rec.taskTitle !== undefined) item.taskTitle = rec.taskTitle;
       if (rec.questionSince !== undefined) item.questionSince = rec.questionSince;
       out.push(item);
     }
@@ -894,6 +932,7 @@ export class StateStore extends EventEmitter {
       if (item.stallText !== undefined) rec.stallText = item.stallText;
       if (item.nameHint !== undefined) rec.nameHint = item.nameHint;
       if (item.bgText !== undefined) rec.bgText = item.bgText;
+      if (item.taskTitle !== undefined) rec.taskTitle = item.taskTitle;
       if (item.questionSince !== undefined) rec.questionSince = item.questionSince;
       this.sessions.set(rec.sessionId, rec);
       added += 1;

@@ -488,3 +488,26 @@ export function subagentMtimeMs(transcriptPath: string): number | null {
   }
   return latest;
 }
+
+/**
+ * Claude Code 自身が transcript に書く「このセッションのタスク名」（260922_10）。
+ * `{"type":"ai-title","aiTitle":"確認待ち左上配置","sessionId":"…"}` の形で会話が進むたび追記される
+ * （2026-09-22 実測: 1 セッションに 118 件。最新のものが現在のタスク）。
+ * 生成コストゼロでセッション単位に出せるため、分割タイルでも「どのタイルが何をしているか」が分かる。
+ * 見つからない・読めないときは undefined
+ */
+export function aiTitleOf(filePath: string): string | undefined {
+  return aiTitleFrom(tailRecords(filePath));
+}
+
+/** aiTitleOf の本体（入力は「新しい順」のレコード列） */
+export function aiTitleFrom(recordsNewestFirst: ReadonlyArray<Record<string, unknown>>): string | undefined {
+  for (const rec of recordsNewestFirst) {
+    if (rec.type !== "ai-title") continue;
+    const title = rec.aiTitle;
+    if (typeof title !== "string") continue;
+    const trimmed = title.replace(/\s+/g, " ").trim();
+    if (trimmed !== "") return trimmed;
+  }
+  return undefined;
+}

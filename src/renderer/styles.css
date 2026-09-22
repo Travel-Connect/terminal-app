@@ -214,6 +214,17 @@ body {
   color: var(--accent);
 }
 
+/* 今やっているタスク（260922_10）: Claude Code が書く ai-title。名前より控えめに、1 行で省略 */
+.tile-task {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-dim);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 手動ステータスバッジ（260727_1）: 自動検知の状態表示と混ざらない控えめなピル */
 .tile-badge {
   flex: none;

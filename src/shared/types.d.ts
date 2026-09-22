@@ -34,6 +34,11 @@ export interface Project {
    * 「記憶した位置へ戻す」で SetWindowPlacement により再現する。未設定 = 記憶なし
    */
   windowBounds?: WindowBounds;
+  /**
+   * AI（Claude Sonnet）が自動で付けた表示名の適用時刻（ISO 8601。260922_10）。
+   * 一度自動で付けた名前は付け直さない（提案のたびに名前が揺れるのを防ぐ）
+   */
+  nameAutoAt?: string;
 }
 
 /**
@@ -65,6 +70,11 @@ export interface AppConfig {
    * false = 灰色タイルをグリッドから隠す。ステータスバーのトグルで切り替え、再起動後も保持
    */
   showUnlinked: boolean;
+  /**
+   * 表示名の自動変更（260922_10）。Jev が「名前が作業を表していない」と判定したプロジェクトの表示名を
+   * Claude Sonnet の提案で自動的に付け替える。false で止められる（config.json を編集。既定 true）
+   */
+  autoRename?: boolean;
 }
 
 /** セッション状態（メモリのみ・揮発。design.md 9 章） */
@@ -110,6 +120,11 @@ export interface SessionView {
    * 判定したときの文言。実行中以外・判定なしは undefined（非表示）
    */
   stallText?: string;
+  /**
+   * このセッションが今やっているタスク（260922_10）。Claude Code が transcript に書く ai-title 由来で、
+   * 会話が進むと更新される。分割タイルでもセッションごとに違う内容が出る。無ければ undefined
+   */
+  taskTitle?: string;
   /**
    * サブエージェント（バックグラウンドエージェント）待ちの印（260922_8）。
    * 本体のターンは終わっているが裏でエージェントが動いている間、タイルは「実行中」のままこの文言を出す。

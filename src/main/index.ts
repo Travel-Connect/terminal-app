@@ -66,6 +66,7 @@ import { classifyLiveness, readSessionRegistry, registryStatusOf, type RegistryE
 import { loadSessionSnapshot, reconcileSnapshot, saveSessionSnapshot, type SnapshotEntry } from "./session-snapshot";
 import {
   activityMtimeMs,
+  aiTitleOf,
   blockedStopOf,
   lastAssistantTextOf,
   lastToolUseOf,
@@ -373,6 +374,33 @@ async function judgeWorkText(sessionId: string, prompt: string, project: Project
   if (verdict.replace && stateStore.setWorkText(sessionId, prompt)) broadcast();
 }
 
+/** タスク名の読み取り記録（260922_10）: sessionId → 最後に読んだ transcript の mtime（同じ内容は読み直さない） */
+const taskTitleRead = new Map<string, number>();
+
+/**
+ * 今やっているタスク（260922_10）: Claude Code が transcript に書く ai-title を読んでタイルに載せる。
+ * 生成はしない（Claude Code が会話に合わせて更新するものをそのまま出す）。
+ * transcript が動いていないセッションは読み直さない
+ */
+function updateTaskTitles(): boolean {
+  let changed = false;
+  const live = new Set(stateStore.sessionIds());
+  for (const sid of taskTitleRead.keys()) if (!live.has(sid)) taskTitleRead.delete(sid);
+  for (const rec of stateStore.transcriptSessions()) {
+    const mtime = statMtimeMs(rec.transcriptPath);
+    if (mtime === null || taskTitleRead.get(rec.sessionId) === mtime) continue;
+    taskTitleRead.set(rec.sessionId, mtime);
+    let title: string | undefined;
+    try {
+      title = aiTitleOf(rec.transcriptPath);
+    } catch {
+      continue; // 読めないときは前回値を維持
+    }
+    if (stateStore.applyTaskTitle(rec.sessionId, title)) changed = true;
+  }
+  return changed;
+}
+
 /** 名前整合の判定記録（260922_6）: sessionId → 最後に判定した「表示名|作業テキスト」。同じ材料では聞き直さない */
 const nameHintJudged = new Map<string, string>();
 
@@ -399,8 +427,59 @@ async function judgeNameHints(): Promise<void> {
     if (verdict === null) continue;
     if (stateStore.applyNameHint(s.sessionId, verdict.text)) changed = true;
     logger.info(`Jev 名前整合判定: ${project.name} (session=${s.sessionId}) → ${verdict.text ?? "問題なし"} (${verdict.detail})`);
+    // 印が付いたら Claude Sonnet の提案でそのまま付け替える（260922_10。1 プロジェクト 1 回だけ）
+    if (verdict.text !== undefined && projectStore.config.autoRename !== false) void autoRenameProject(project.id);
   }
   if (changed) broadcast();
+}
+
+/** 自動リネームの実行中フラグ（260922_10）: CLI 呼び出しは重いので 1 件ずつ直列に行う */
+let autoRenameBusy = false;
+
+/**
+ * 自動リネーム（260922_10）: Jev が「名前が作業を表していない」と判定したプロジェクトの表示名を、
+ * Claude Sonnet の提案でそのまま付け替える（確認ダイアログなし。ユーザー依頼 2026-09-22）。
+ * 暴走させないための歯止め:
+ * - すでに自動で名前を付けたプロジェクト（nameAutoAt あり）は対象外 — 提案のたびに名前が揺れない
+ * - 同時に 1 件だけ（CLI は 1 回 7〜70 秒）
+ * - 失敗しても既存の表示名は変えない
+ */
+async function autoRenameProject(id: string): Promise<void> {
+  if (autoRenameBusy) return;
+  const project = projectStore.getProject(id);
+  if (project === null || project.nameAutoAt !== undefined) return;
+  autoRenameBusy = true;
+  try {
+    const before = project.name;
+    const works = stateStore
+      .workTextSessions()
+      .filter((w) => w.projectId === id)
+      .map((w) => w.workText);
+    const titles = stateStore
+      .taskTitles()
+      .filter((t) => t.projectId === id)
+      .map((t) => t.taskTitle);
+    setStatus(`表示名を自動で付け直しています（Claude Sonnet）: ${before}`);
+    const result = await suggestProjectName({ folderName: path.basename(project.path), currentName: before, works: [...titles, ...works] }, project.path, {
+      run: runClaudeCli,
+    });
+    if (!result.ok || result.name === undefined) {
+      logger.warn(`自動リネームを見送り: ${before} — ${result.error ?? "不明"}`);
+      setStatus(`表示名の自動変更を見送りました: ${result.error ?? "不明"}`);
+      return;
+    }
+    const renamed = projectStore.renameProject(id, result.name, true);
+    if (!renamed.ok) {
+      logger.warn(`自動リネームに失敗: ${before} — ${renamed.error ?? "不明"}`);
+      return;
+    }
+    stateStore.clearNameHints(id);
+    nameHintJudged.clear();
+    logger.info(`自動リネーム: ${before} → ${renamed.name}（Claude Sonnet）`);
+    setStatus(`表示名を自動で変更しました: ${before} → ${renamed.name}（右クリック →「表示名を変更…」で直せます）`);
+  } finally {
+    autoRenameBusy = false;
+  }
 }
 
 /**
@@ -793,6 +872,9 @@ function sweepLiveness(): void {
       logger.info(`返答待ちから実行中へ復帰: ${project?.name ?? hit.target.projectId} (session=${hit.target.sessionId}) — ${why}`);
     }
   }
+
+  // 今やっているタスク（260922_10）: transcript の ai-title を読み直す
+  if (updateTaskTitles()) changed = true;
 
   // (1'') ループ進捗バッジ（260907_2）: eval-loop の registry / state.json から各セッションの進捗文言を更新する。
   //       状態遷移には触れない（statusLine 転送と同じ扱い）。出現・消滅だけログに残す（経過分の変化は残さない）

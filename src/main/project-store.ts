@@ -64,6 +64,7 @@ function defaultConfig(): AppConfig {
     notifySound: { enabled: false }, // REQ-12 予約キー。MVP では常に false
     customStatuses: ["作業中", "レビュー待ち", "保留"], // 手動ステータスの初期選択肢（260727_1）
     showUnlinked: true, // 未接続タイル（260903_1）は既定で表示（従来どおりの見え方。灰色化のみ）
+    autoRename: true, // 表示名の自動変更（260922_10）。config.json で false にすると止まる
   };
 }
 
@@ -233,8 +234,9 @@ export class ProjectStore {
   /**
    * 表示名の変更（260903_2）。前後の空白を除き、空ならフォルダ名（path の basename）へ戻す。
    * path は変えないため、前面化・切断検知・cwd 対応付け（いずれも path 基準）には影響しない。
+   * auto=true は AI（Claude Sonnet）が自動で付けた名前（260922_10）。適用時刻を残し、同じ名前を何度も付け直さない。
    */
-  renameProject(id: string, name: string): RenameResult {
+  renameProject(id: string, name: string, auto = false): RenameResult {
     const p = this._projects.find((x) => x.id === id);
     if (!p) return { ok: false, error: "プロジェクトが見つかりません" };
     const trimmed = name.trim();
@@ -242,6 +244,7 @@ export class ProjectStore {
       return { ok: false, error: `表示名は ${PROJECT_NAME_MAX} 文字以内にしてください` };
     }
     p.name = trimmed === "" ? path.basename(p.path) : trimmed;
+    if (auto) p.nameAutoAt = new Date().toISOString();
     this.saveProjects();
     return { ok: true, name: p.name };
   }

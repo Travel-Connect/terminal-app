@@ -164,7 +164,11 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   badgeRow.className = "tile-badge-row";
   badgeRow.hidden = true;
   badgeRow.append(badge, loop, alert, nameHint, bg);
-  head.append(nameRow, badgeRow);
+  // 今やっているタスク（260922_10）: Claude Code の ai-title。名前の下に薄く出す
+  const task = document.createElement("span");
+  task.className = "tile-task";
+  task.hidden = true;
+  head.append(nameRow, task, badgeRow);
   const center = document.createElement("span");
   center.className = "tile-center";
   const spinner = document.createElement("span");
@@ -420,6 +424,14 @@ function renderGrid(): void {
       bgEl.title = bgText === "" ? "" : `${bgText}（本体の応答は終わっていますが、バックグラウンドのエージェントが動いています）`;
     }
     bgEl.hidden = bgText === "";
+    // 今やっているタスク（260922_10）。同じプロジェクトでもセッションごとに違う
+    const taskEl = el.querySelector(".tile-task") as HTMLElement;
+    const task = session?.taskTitle ?? "";
+    if (taskEl.textContent !== task) {
+      taskEl.textContent = task;
+      taskEl.title = task;
+    }
+    taskEl.hidden = task === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
     badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "" && bgText === "";
     const icon = STATE_META[state].icon;
