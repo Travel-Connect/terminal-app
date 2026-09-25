@@ -86,6 +86,7 @@ import {
   isAvailable as windowApiAvailable,
   listTopLevelWindows,
   readProjectWindowPlacement,
+  revealPointer,
   type TopLevelWindow,
 } from "./window-control";
 import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
@@ -1707,6 +1708,11 @@ function wireIpc(): void {
     broadcast();
   });
 
+  // タイル外のタッチ終了（260925_2）: 前面化はしないが、Windows が隠したポインターを再表示する
+  ipcMain.on("touch-ended", () => {
+    revealPointer((ev) => logger.info(`${ev.message}: タイル外のタッチ`));
+  });
+
   ipcMain.handle("focus-project", (_e, id: string, options?: FocusProjectOptions) => {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
@@ -1715,7 +1721,7 @@ function wireIpc(): void {
     const viaTouch = options?.viaTouch === true;
     const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), {
       warpPointer: viaTouch,
-      onWarpResult: (msg) => logger.info(`${msg}: ${project.name}`),
+      onWarpEvent: (ev) => logger.info(`${ev.message}: ${project.name}`),
     });
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));

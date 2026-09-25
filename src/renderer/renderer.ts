@@ -716,6 +716,16 @@ window.setInterval(() => {
 
 let dragDepth = 0;
 
+// タッチ／ペンの接触が終わるたびに main へ知らせる（260925_2）。Windows はタッチ画面に触れるたびに
+// ポインターを隠すため、スクロールやタイル外の接触でも迷子になる。タイル上なら続く click で対象へ
+// 移動するが、その場合もここでの再表示は害がない（位置は変えない）
+window.addEventListener("pointerup", (e) => {
+  if (e.pointerType === "touch" || e.pointerType === "pen") api.notifyTouchEnded();
+});
+window.addEventListener("pointercancel", (e) => {
+  if (e.pointerType === "touch" || e.pointerType === "pen") api.notifyTouchEnded();
+});
+
 window.addEventListener("dragenter", (e) => {
   if (isTileDrag(e.dataTransfer)) return; // タイルの並べ替え中（260906_1）は登録用オーバーレイを出さない
   e.preventDefault();

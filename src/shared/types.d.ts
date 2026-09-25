@@ -251,6 +251,11 @@ export interface TerminalAppApi {
   setPinned(value: boolean): Promise<void>;
   focusProject(id: string, options?: FocusProjectOptions): Promise<FocusResult>;
   /**
+   * タイル以外の場所でタッチ／ペンの接触が終わった（260925_2: Windows が隠したポインターを再表示する。
+   * 位置は変えない。戻り値なし・待たない）
+   */
+  notifyTouchEnded(): void;
+  /**
    * タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除）。
    * sessionId は分割タイル（260904_1 #3）のときだけ渡す — 「この枠を消す」の対象になる
    */

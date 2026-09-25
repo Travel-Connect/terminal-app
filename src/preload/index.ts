@@ -23,6 +23,7 @@ const api: TerminalAppApi = {
   setAlwaysOnTopDefault: (value: boolean) => ipcRenderer.invoke("set-aot-default", value),
   setPinned: (value: boolean) => ipcRenderer.invoke("set-pinned", value),
   focusProject: (id: string, options?: FocusProjectOptions) => ipcRenderer.invoke("focus-project", id, options),
+  notifyTouchEnded: () => ipcRenderer.send("touch-ended"),
   showTileMenu: (id: string, sessionId?: string) => ipcRenderer.invoke("show-tile-menu", id, sessionId),
   // ウィンドウ位置の一括記憶／復元（260904_1 #3。設定画面のボタンから）
   saveAllWindowBounds: () => ipcRenderer.invoke("save-all-window-bounds"),
