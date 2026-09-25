@@ -1,6 +1,6 @@
 # terminal-app
 
-Claude Code の並行セッションを監視する Windows 11 常駐タイルダッシュボード（Electron）。
+Claude Code / Codex の並行セッションを監視する Windows 11 常駐タイルダッシュボード（Electron）。
 **どのセッションが止まったかをひと目で識別し、1 クリックで対象ウィンドウ（Cursor / ターミナル）に切り替える。**
 
 - 要件: `docs/spec.md`（REQ / NFR / AC / OPEN の正本）
@@ -120,10 +120,36 @@ start-app.bat
 
 ## テスト・検証
 
+### Codex の状態表示
+
+登録済みのプロジェクトで使っている Codex は、アプリ起動時と約 5 秒ごとに自動で読み取り、
+「Codex」の印があるタイルに表示する。同じフォルダで Claude Code と併用すると分割タイルになる。
+Codex CLI、Cursor の Codex 拡張、Codex アプリのローカル会話が対象。
+Codex 側の設定変更や hook の追加は不要で、再起動後もローカル履歴から表示を復元する。
+
+- 対応する状態は実行中・完了・エラー、および Codex が構造化データで記録した質問の返答待ち。
+  ツールの権限承認待ちは履歴から確定できないため、専用の検知対象には含まない。
+- 直近 24 時間に更新された未アーカイブの対話を対象にする。サブエージェントや `codex exec` の自動処理は除く。
+  タイルはプロジェクトごとに実行中・返答待ちをすべて、終了済みを直近 1 件表示する。
+- プロセスの生存を示すデータではないため、実行中のまま 30 分以上更新されない会話は「切断」とする。
+  Codex が更新すると次の読み取りで状態を戻す。「切断」はプロセス終了の断定ではない。
+- 読み取り先は `CODEX_HOME`、未指定なら `%USERPROFILE%\.codex`。
+  `state_5.sqlite` と `thread_history_1.sqlite` を読み取り専用で開き、Codex の設定・会話データには書き込まない。
+  会話本文をログに記録したり、Jev / 自動改名へ渡したりしない。
+- 現行ローカル DB 形式（Codex CLI 0.157.0 で確認）に対応。旧版で DB が無い場合や形式変更時は取得できない。
+  読み取りの一時的な失敗は再試行し、30 秒以上続く場合は古い実行中・返答待ち表示を「切断」にする。
+- 停止する場合は `%APPDATA%\terminal-app\config.json` に `"monitorCodex": false` を設定して再起動する。
+  タイルをクリックした際の移動先は従来どおりプロジェクトの Cursor / ターミナル設定に従う。
+- 検証用に `TERMINAL_APP_CODEX_HOME` と `TERMINAL_APP_CODEX_POLL_MS` を指定できる。
+  `TERMINAL_APP_DATA_DIR` を指定した検証では、前者の明示指定がない限り実際の Codex 履歴は読み取らない。
+
+### 検証コマンド
+
 | コマンド | 内容 |
 |----------|------|
 | `npm test` | 単体・統合テスト（Vitest。hooks マージ/除去・状態遷移・HTTP 受信・永続化） |
 | `npm run typecheck` | main / renderer / tests の型検査 |
+| `node scripts/verify-codex-e2e.mjs [出力先]` | 使い捨て Codex DB と専用 Electron で状態変更・Claude 併用・掃引後の表示・再起動復元を確認 |
 | `npm run lint` | ESLint |
 | `npm run smoke:win32` | Win32 FFI（ウィンドウ列挙・前面化 API）のスモーク確認 |
 | `node scripts/verify-injection.mjs <出力先>` | デモ起動＋擬似イベント注入（UserPromptSubmit→実行中を含む）＋バインド確認（verification.md 3.4 / 3.7）を自動実行し証跡を残す |
