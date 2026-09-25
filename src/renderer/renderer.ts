@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { autoArrangeIds, confirmFirstIds, confirmLabel, confirmTilesFirst, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked, tileAlertText } from "./format.js";
+import { autoArrangeIds, confirmFirstIds, confirmLabel, confirmTilesFirst, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, tileAlertText } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -79,7 +79,8 @@ const UNLINKED_HINT: Record<ClickTarget, string> = {
 
 /** 未接続タイルの件数（260903_1）。ステータスバーのトグルラベル用 */
 function countUnlinked(s: Snapshot): number {
-  return s.projects.filter((p) => isUnlinked(s.windowPresence[p.id], s.sessions[p.id]?.state)).length;
+  return buildTileSpecs(s).filter(({ project, session }) =>
+    isUnlinked(s.windowPresence[project.id], session?.state, session?.provider)).length;
 }
 
 function tileStatusText(session: SessionView | undefined): string {
@@ -140,7 +141,11 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const seq = document.createElement("span");
   seq.className = "tile-seq";
   seq.hidden = true;
-  nameRow.append(name, seq);
+  const provider = document.createElement("span");
+  provider.className = "tile-provider";
+  provider.textContent = "Codex";
+  provider.hidden = true;
+  nameRow.append(name, seq, provider);
   const badge = document.createElement("span");
   badge.className = "tile-badge";
   badge.hidden = true;
@@ -294,8 +299,8 @@ function autoArrange(): void {
   const linked: Record<string, boolean> = {};
   for (const p of s.projects) {
     const members = s.splitSessions[p.id];
-    const states = members !== undefined && members.length >= 2 ? members.map((m) => m.state) : [s.sessions[p.id]?.state];
-    linked[p.id] = projectLinked(s.windowPresence[p.id], states);
+    const sessions = members !== undefined && members.length >= 2 ? members : [s.sessions[p.id]];
+    linked[p.id] = sessions.some((session) => !isUnlinked(s.windowPresence[p.id], session?.state, session?.provider));
   }
   const ids = s.projects.map((p) => p.id);
   const linkedCount = ids.filter((id) => linked[id]).length;
@@ -374,7 +379,7 @@ function renderGrid(): void {
     tileSessions.set(spec.key, session);
     const state = session === undefined ? "waiting" : session.state;
     // 未接続（260903_1）: 対象アプリのウィンドウ無し＋実行中／確認待ちでない → 灰色。非表示設定なら隠す
-    const unlinked = isUnlinked(snap!.windowPresence[project.id], state);
+    const unlinked = isUnlinked(snap!.windowPresence[project.id], state, session?.provider);
     const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
     if (el.className !== cls) el.className = cls; // 同一値の再代入を避けて発光アニメを継続させる
     const hidden = unlinked && !snap!.config.showUnlinked;
@@ -390,6 +395,9 @@ function renderGrid(): void {
     const seqText = spec.seq !== undefined ? seqLabel(spec.seq) : "";
     if (seqEl.textContent !== seqText) seqEl.textContent = seqText;
     seqEl.hidden = seqText === "";
+    // Codex のセッションは名前の横で識別する。既存の Claude タイルには表示しない
+    const providerEl = el.querySelector(".tile-provider") as HTMLElement;
+    providerEl.hidden = session?.provider !== "codex";
     // 手動ステータスバッジ（260727_1）。未割り当ては非表示でレイアウトを崩さない
     const badgeEl = el.querySelector(".tile-badge") as HTMLElement;
     const badge = project.customStatus ?? "";
