@@ -196,6 +196,8 @@ scripts/               … build 補助・スモーク・注入検証
 
 - 設定・登録情報: `%APPDATA%\terminal-app\`（`projects.json` / `config.json`）
 - ログ: `%APPDATA%\terminal-app\logs\app.log`（日次ローテーション・7 日保持）
+- 通常の動作ログはファイルだけに保存する。`start-app.bat` はアプリの標準出力・標準エラーを切り離し、
+  Cursor 内の Codex などの入力欄にログや起動時の警告が混ざるのを防ぐ。
 - 環境変数 `TERMINAL_APP_DATA_DIR` でデータディレクトリを差し替え可能（テスト・デモ用）
 - 環境変数 `TERMINAL_APP_WINDOW_POLL_MS` で未接続タイル判定（ウィンドウ列挙）の間隔を変更可能（既定 5000ms。検証用）
 - 環境変数 `TERMINAL_APP_LIVENESS_INTERVAL_MS` で掃引（終了・切断・確認待ち復帰・登録簿の生死判定）の間隔を変更可能（既定 15000ms。検証用）
