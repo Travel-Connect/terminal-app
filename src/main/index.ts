@@ -16,7 +16,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
+import type { ClickTarget, DropPayload, FocusProjectOptions, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
 import { seedDemo } from "./demo";
@@ -1707,12 +1707,17 @@ function wireIpc(): void {
     broadcast();
   });
 
-  ipcMain.handle("focus-project", (_e, id: string) => {
+  ipcMain.handle("focus-project", (_e, id: string, options?: FocusProjectOptions) => {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
-    // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
-    logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
+    // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）。
+    // タッチ操作のときはポインターを対象ウィンドウへ連れて行く（260925_1: 別画面で迷子になるため）
+    const viaTouch = options?.viaTouch === true;
+    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), {
+      warpPointer: viaTouch,
+      onWarpResult: (msg) => logger.info(`${msg}: ${project.name}`),
+    });
+    logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     return outcome;
   });

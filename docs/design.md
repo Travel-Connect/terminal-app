@@ -348,6 +348,12 @@ Windows はバックグラウンドプロセスによるフォーカス奪取を
 
 実装手段: Electron の場合は koffi 等の FFI で user32.dll を呼ぶ／Tauri の場合は `windows` crate（OPEN-01 に従う）。
 
+### 7.3 タッチ操作時のポインター迷子対策（260925_1）
+
+タッチパネル（別画面）でタイルをタップすると、Windows はポインターを隠したうえ位置をタッチした画面に残すため、前面化した Cursor 側でポインターが見つからなくなる。renderer は `click` の `PointerEvent.pointerType` が `touch` / `pen` のときだけ `focusProject(id, { viaTouch: true })` を送り、main は前面化成功後に `GetWindowRect` の中央へ `SetCursorPos` → `mouse_event(MOUSEEVENTF_MOVE, ±1)` の擬似マウス移動でポインターを再表示させる（`SetCursorPos` だけでは隠れたままになるため）。マウスクリック時は何もしない（ポインターを勝手に動かさない）。ポインター移動の失敗は前面化の結果に影響させない。
+
+実機では即時 1 回の移動だけでは時々負けた（Windows のタッチ→マウス変換の遅延メッセージがポインターをタッチ位置へ戻す）。そのため即時に加えて 120 / 300 / 600 / 1000ms 後にも `GetCursorPos` で「まだ対象ウィンドウの矩形外にいるか」を確かめ、外にいる時だけ移し直す（中にいれば触らない＝ユーザーが動かし始めたマウスを邪魔しない）。遅延後にやり直した回数は app.log に出る。
+
 ## 8. 常駐・ウィンドウ挙動
 
 対応要件: REQ-07

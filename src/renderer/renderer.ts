@@ -184,10 +184,14 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   center.append(spinner, icon, work);
   el.append(glow, head, center, status);
 
-  el.addEventListener("click", () => {
+  el.addEventListener("click", (e) => {
     // クリックで前面化（REQ-05）。分割タイルもプロジェクトのウィンドウを前面化する（Cursor 内の
-    // 特定ターミナルまでは外から選べない）。失敗メッセージは main からステータスバーへ届く
-    void api.focusProject(project.id);
+    // 特定ターミナルまでは外から選べない）。失敗メッセージは main からステータスバーへ届く。
+    // タッチ／ペンのときは main にそれを伝え、ポインターを対象ウィンドウへ連れて行ってもらう
+    // （260925_1: タッチ後は Windows がポインターを隠す＋別画面に残すため迷子になる）
+    const pointerType = (e as PointerEvent).pointerType;
+    const viaTouch = pointerType === "touch" || pointerType === "pen";
+    void api.focusProject(project.id, viaTouch ? { viaTouch: true } : undefined);
   });
   el.addEventListener("contextmenu", (e) => {
     // 右クリック = プロジェクト操作メニュー（260712_2: 再接続・表示クリア・登録解除）。

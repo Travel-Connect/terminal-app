@@ -3,7 +3,7 @@
  * 型定義は src/shared/types.d.ts の TerminalAppApi を正とする。
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ClickTarget, DropPayload, Snapshot, TerminalAppApi, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, DropPayload, FocusProjectOptions, Snapshot, TerminalAppApi, ThemeSetting, WindowAction } from "../shared/types";
 
 const api: TerminalAppApi = {
   getSnapshot: () => ipcRenderer.invoke("get-snapshot"),
@@ -22,7 +22,7 @@ const api: TerminalAppApi = {
   setTheme: (theme: ThemeSetting) => ipcRenderer.invoke("set-theme", theme),
   setAlwaysOnTopDefault: (value: boolean) => ipcRenderer.invoke("set-aot-default", value),
   setPinned: (value: boolean) => ipcRenderer.invoke("set-pinned", value),
-  focusProject: (id: string) => ipcRenderer.invoke("focus-project", id),
+  focusProject: (id: string, options?: FocusProjectOptions) => ipcRenderer.invoke("focus-project", id, options),
   showTileMenu: (id: string, sessionId?: string) => ipcRenderer.invoke("show-tile-menu", id, sessionId),
   // ウィンドウ位置の一括記憶／復元（260904_1 #3。設定画面のボタンから）
   saveAllWindowBounds: () => ipcRenderer.invoke("save-all-window-bounds"),

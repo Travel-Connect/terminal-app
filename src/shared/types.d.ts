@@ -207,6 +207,12 @@ export interface OpResult {
   error?: string;
 }
 
+/** focusProject のオプション（260925_1: タッチ操作時のポインター迷子対策） */
+export interface FocusProjectOptions {
+  /** タッチ／ペンでタイルを押した（前面化後にポインターを対象ウィンドウへ移す） */
+  viaTouch?: boolean;
+}
+
 export interface FocusResult {
   ok: boolean;
   message?: string;
@@ -243,7 +249,7 @@ export interface TerminalAppApi {
   setTheme(theme: ThemeSetting): Promise<void>;
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
-  focusProject(id: string): Promise<FocusResult>;
+  focusProject(id: string, options?: FocusProjectOptions): Promise<FocusResult>;
   /**
    * タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除）。
    * sessionId は分割タイル（260904_1 #3）のときだけ渡す — 「この枠を消す」の対象になる

@@ -16,6 +16,18 @@ export interface FocusOutcome {
   message?: string;
 }
 
+/** 前面化のオプション（260925_1） */
+export interface FocusOptions {
+  /**
+   * タッチ／ペンでタイルを押した時に true。Windows はタッチ入力でマウスポインターを隠し、位置も
+   * タッチした画面に残すため、別画面の Cursor を前面化するとポインターが「迷子」になる。
+   * true なら前面化後にポインターを対象ウィンドウ中央へ移し、擬似マウス移動で再表示させる
+   */
+  warpPointer?: boolean;
+  /** ポインター移動の結果（遅延つき再試行を含む）を受け取る。ログ用 */
+  onWarpResult?: (message: string) => void;
+}
+
 export interface TopLevelWindow {
   title: string;
   exe: string;
@@ -31,6 +43,8 @@ const WPF_RESTORETOMAXIMIZED = 0x0002;
 const MONITOR_DEFAULTTONULL = 0;
 const VK_MENU = 0x12;
 const KEYEVENTF_KEYUP = 0x0002;
+/** mouse_event: 相対移動（ポインター再表示のための微小移動に使う） */
+const MOUSEEVENTF_MOVE = 0x0001;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 /** ウィンドウ配置（260904_1 #3）。GetWindowPlacement の通常時矩形 ＋ 表示状態 */
@@ -82,6 +96,11 @@ interface Win32Api {
   SetWindowPlacement: any;
   MonitorFromRect: any;
   WINDOWPLACEMENT: any;
+  /** タッチ後のポインター迷子対策（260925_1） */
+  GetWindowRect: any;
+  GetCursorPos: any;
+  SetCursorPos: any;
+  MouseEvent: any;
 }
 
 let cached: Win32Api | null | undefined;
@@ -133,6 +152,10 @@ function loadApi(): Win32Api | null {
       SetWindowPlacement: user32.func("bool __stdcall SetWindowPlacement(void *hwnd, const TA_WINDOWPLACEMENT *wp)"),
       MonitorFromRect: user32.func("void *__stdcall MonitorFromRect(const TA_RECT *rc, uint32_t flags)"),
       WINDOWPLACEMENT,
+      GetWindowRect: user32.func("bool __stdcall GetWindowRect(void *hwnd, _Out_ TA_RECT *rc)"),
+      GetCursorPos: user32.func("bool __stdcall GetCursorPos(_Out_ TA_POINT *pt)"),
+      SetCursorPos: user32.func("bool __stdcall SetCursorPos(int x, int y)"),
+      MouseEvent: user32.func("void __stdcall mouse_event(uint32_t dwFlags, int32_t dx, int32_t dy, uint32_t dwData, size_t dwExtraInfo)"),
     };
   } catch (e) {
     console.error(`window-control: koffi のロードに失敗しました: ${String(e)}`);
@@ -245,7 +268,7 @@ function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: strin
  * クリック → 前面化（design.md 3.2(c) / 7 章）。
  * folderName = プロジェクトのフォルダ basename（タイトル一致はヒューリスティック。design.md 7.1）
  */
-export function focusProjectWindow(target: ClickTarget, folderName: string): FocusOutcome {
+export function focusProjectWindow(target: ClickTarget, folderName: string, options: FocusOptions = {}): FocusOutcome {
   const api = loadApi();
   if (api === null) {
     return { ok: false, message: "Win32 API を利用できません（koffi 未ロード）" };
@@ -255,10 +278,70 @@ export function focusProjectWindow(target: ClickTarget, folderName: string): Foc
     if (hwnd === null) {
       return { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` };
     }
-    return bringToForeground(api, hwnd);
+    const outcome = bringToForeground(api, hwnd);
+    if (outcome.ok && options.warpPointer === true) scheduleWarpPointer(api, hwnd, options.onWarpResult);
+    return outcome;
   } catch (e) {
     return { ok: false, message: `前面化に失敗しました: ${String(e)}` };
   }
+}
+
+/**
+ * タッチ後のポインター移動の再試行タイミング（ms）。0 = 即時。
+ * Windows はタッチ→マウス変換の遅延メッセージでポインターをタッチ位置へ戻す＋再度隠すことがあり、
+ * 即時 1 回の移動だけでは負けることがある（260925_1 追補）。タッチ処理が落ち着くまで数回やり直す
+ */
+export const POINTER_WARP_RETRY_DELAYS_MS: readonly number[] = [0, 120, 300, 600, 1000];
+
+/**
+ * ポインターを対象ウィンドウの中央へ移す（260925_1: タッチ後のポインター迷子対策）。
+ * 即時に 1 回移し、その後は遅延つきで「ポインターがまだ対象ウィンドウの外にいるか」を GetCursorPos で
+ * 確かめてから移し直す（すでに中にいるなら触らない＝ユーザーが動かし始めたマウスを邪魔しない）。
+ * 失敗しても前面化の結果は変えない
+ */
+function scheduleWarpPointer(api: Win32Api, hwnd: any, onResult?: (msg: string) => void): void {
+  let attempts = 0;
+  for (const delay of POINTER_WARP_RETRY_DELAYS_MS) {
+    const run = (): void => {
+      const outcome = warpPointerToWindow(api, hwnd, delay > 0);
+      attempts += 1;
+      // 即時の 1 回目は前面化ログに含まれるので、遅延後にやり直した時と失敗だけ知らせる
+      if (outcome === "warped" && delay > 0) onResult?.(`ポインター移動をやり直し ${attempts} 回目（${delay}ms 後、まだ対象の外だった）`);
+      else if (outcome === "failed") onResult?.(`ポインター移動に失敗（${delay}ms 後）`);
+    };
+    if (delay === 0) run();
+    else setTimeout(run, delay).unref?.();
+  }
+}
+
+/**
+ * @param onlyIfOutside true なら、ポインターが対象ウィンドウの矩形内にいる時は移動しない
+ * @returns warped = 移動した / kept = 矩形内にいたので触らず / failed = API 失敗
+ */
+function warpPointerToWindow(api: Win32Api, hwnd: any, onlyIfOutside: boolean): "warped" | "kept" | "failed" {
+  try {
+    const rc = { left: 0, top: 0, right: 0, bottom: 0 };
+    if (!(api.GetWindowRect(hwnd, rc) as boolean)) return "failed";
+    if (onlyIfOutside) {
+      const pt = { x: 0, y: 0 };
+      if ((api.GetCursorPos(pt) as boolean) && pointInRect(pt, rc)) return "kept";
+    }
+    const x = Math.round((rc.left + rc.right) / 2);
+    const y = Math.round((rc.top + rc.bottom) / 2);
+    api.SetCursorPos(x, y);
+    // SetCursorPos だけではタッチで隠れたポインターが再表示されないため、mouse_event で 1px 往復の
+    // 擬似マウス移動を送り「マウス入力があった」扱いにして再表示させる
+    api.MouseEvent(MOUSEEVENTF_MOVE, 1, 0, 0, 0);
+    api.MouseEvent(MOUSEEVENTF_MOVE, -1, 0, 0, 0);
+    return "warped";
+  } catch (e) {
+    console.warn(`window-control: ポインター移動に失敗しました（前面化は成功）: ${String(e)}`);
+    return "failed";
+  }
+}
+
+export function pointInRect(pt: { x: number; y: number }, rc: { left: number; top: number; right: number; bottom: number }): boolean {
+  return pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom;
 }
 
 function emptyPlacement(api: Win32Api): any {
