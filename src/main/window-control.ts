@@ -11,6 +11,7 @@
 import * as path from "path";
 import type { ClickTarget } from "../shared/types";
 import { PointerWarper, type PointerPort, type PointerState, type Rect, type WarpEvent } from "./pointer-warp";
+import { absoluteMousePoint, PointerPulse } from "./pointer-pulse";
 
 export interface FocusOutcome {
   ok: boolean;
@@ -44,8 +45,8 @@ const WPF_RESTORETOMAXIMIZED = 0x0002;
 const MONITOR_DEFAULTTONULL = 0;
 const VK_MENU = 0x12;
 const KEYEVENTF_KEYUP = 0x0002;
-/** mouse_event: 相対移動（ポインター再表示のための微小移動に使う） */
-const MOUSEEVENTF_MOVE = 0x0001;
+/** MOVE | MOVE_NOCOALESCE | VIRTUALDESK | ABSOLUTE */
+const POINTER_INPUT_FLAGS = 0xE001;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 /** ウィンドウ配置（260904_1 #3）。GetWindowPlacement の通常時矩形 ＋ 表示状態 */
@@ -103,7 +104,14 @@ interface Win32Api {
   GetCursorInfo: any;
   CURSORINFO: any;
   SetCursorPos: any;
-  MouseEvent: any;
+  SendInput: any;
+  MOUSE_INPUT: any;
+  GetSystemMetrics: any;
+  GetMonitorInfo: any;
+  MONITORINFO: any;
+  GetClipCursor: any;
+  GetAsyncKeyState: any;
+  WindowFromPoint: any;
 }
 
 let cached: Win32Api | null | undefined;
@@ -124,6 +132,12 @@ function loadApi(): Win32Api | null {
     const RECT = koffi.struct("TA_RECT", { left: "int32", top: "int32", right: "int32", bottom: "int32" });
     // GetCursorInfo（260925_2）: flags に CURSOR_SHOWING / CURSOR_SUPPRESSED（タッチで抑制中）が入る
     const CURSORINFO = koffi.struct("TA_CURSORINFO", { cbSize: "uint32", flags: "uint32", hCursor: "void *", ptScreenPos: POINT });
+    const MONITORINFO = koffi.struct("TA_MONITORINFO", { cbSize: "uint32", rcMonitor: RECT, rcWork: RECT, dwFlags: "uint32" });
+    const MOUSEINPUT = koffi.struct("TA_MOUSEINPUT", {
+      dx: "int32", dy: "int32", mouseData: "uint32", dwFlags: "uint32", time: "uint32", dwExtraInfo: "uintptr_t",
+    });
+    // INPUT の union は MOUSEINPUT が最大。マウス入力のみ扱い、x64 では offset 8 / 全体 40 bytes。
+    const MOUSE_INPUT = koffi.struct("TA_MOUSE_INPUT", { type: "uint32", mi: MOUSEINPUT });
     const WINDOWPLACEMENT = koffi.struct("TA_WINDOWPLACEMENT", {
       length: "uint32",
       flags: "uint32",
@@ -162,7 +176,14 @@ function loadApi(): Win32Api | null {
       GetCursorInfo: user32.func("bool __stdcall GetCursorInfo(_Inout_ TA_CURSORINFO *ci)"),
       CURSORINFO,
       SetCursorPos: user32.func("bool __stdcall SetCursorPos(int x, int y)"),
-      MouseEvent: user32.func("void __stdcall mouse_event(uint32_t dwFlags, int32_t dx, int32_t dy, uint32_t dwData, size_t dwExtraInfo)"),
+      SendInput: user32.func("uint32 __stdcall SendInput(uint32 count, const TA_MOUSE_INPUT *inputs, int size)"),
+      MOUSE_INPUT,
+      GetSystemMetrics: user32.func("int __stdcall GetSystemMetrics(int index)"),
+      GetMonitorInfo: user32.func("int __stdcall GetMonitorInfoW(void *monitor, _Inout_ TA_MONITORINFO *info)"),
+      MONITORINFO,
+      GetClipCursor: user32.func("int __stdcall GetClipCursor(_Out_ TA_RECT *rect)"),
+      GetAsyncKeyState: user32.func("int16 __stdcall GetAsyncKeyState(int key)"),
+      WindowFromPoint: user32.func("void * __stdcall WindowFromPoint(TA_POINT point)"),
     };
   } catch (e) {
     console.error(`window-control: koffi のロードに失敗しました: ${String(e)}`);
@@ -322,7 +343,7 @@ function pointerWarper(api: Win32Api): PointerWarper {
 }
 
 function makePointerPort(api: Win32Api): PointerPort {
-  return {
+  const port: PointerPort = {
     windowRect(handle: unknown): Rect | null {
       const rc = { left: 0, top: 0, right: 0, bottom: 0 };
       return (api.GetWindowRect(handle, rc) as boolean) ? rc : null;
@@ -330,20 +351,53 @@ function makePointerPort(api: Win32Api): PointerPort {
     cursor(): PointerState | null {
       const ci = { cbSize: api.koffi.sizeof(api.CURSORINFO) as number, flags: 0, hCursor: null, ptScreenPos: { x: 0, y: 0 } };
       if (api.GetCursorInfo(ci) as boolean) {
-        return { pos: { x: ci.ptScreenPos.x, y: ci.ptScreenPos.y }, flags: ci.flags };
+        const foregroundPid = new Uint32Array(1);
+        const pointerWindowPid = new Uint32Array(1);
+        api.GetWindowThreadProcessId(api.GetForegroundWindow(), foregroundPid);
+        api.GetWindowThreadProcessId(api.WindowFromPoint(ci.ptScreenPos), pointerWindowPid);
+        return {
+          pos: { x: ci.ptScreenPos.x, y: ci.ptScreenPos.y }, flags: ci.flags,
+          hasCursorShape: ci.hCursor !== null, foregroundPid: foregroundPid[0], pointerWindowPid: pointerWindowPid[0],
+        };
       }
       const pt = { x: 0, y: 0 };
       if (api.GetCursorPos(pt) as boolean) return { pos: { x: pt.x, y: pt.y }, flags: null };
       return null;
     },
     setCursorPos(x: number, y: number): void {
-      api.SetCursorPos(x, y);
+      if (!api.SetCursorPos(x, y)) throw new Error("SetCursorPos failed");
     },
-    jiggle(): void {
-      api.MouseEvent(MOUSEEVENTF_MOVE, 1, 0, 0, 0);
-      api.MouseEvent(MOUSEEVENTF_MOVE, -1, 0, 0, 0);
+    jiggle(onFailure): void {
+      pulse.start(onFailure);
     },
+    cancelJiggle(): void { pulse.cancel(); },
   };
+  const pulse = new PointerPulse({
+    position: () => port.cursor()?.pos ?? null,
+    canMove: () => [1, 2, 4, 5, 6].every((key) => (api.GetAsyncKeyState(key) & 0x8000) === 0),
+    monitorBounds(point): Rect | null {
+      const monitor = api.MonitorFromRect({ left: point.x, top: point.y, right: point.x + 1, bottom: point.y + 1 }, MONITOR_DEFAULTTONULL);
+      if (monitor === null) return null;
+      const empty = (): Rect => ({ left: 0, top: 0, right: 0, bottom: 0 });
+      const info = { cbSize: api.koffi.sizeof(api.MONITORINFO), rcMonitor: empty(), rcWork: empty(), dwFlags: 0 };
+      const clip = empty();
+      if (!api.GetMonitorInfo(monitor, info) || !api.GetClipCursor(clip)) return null;
+      return {
+        left: Math.max(info.rcMonitor.left, clip.left), top: Math.max(info.rcMonitor.top, clip.top),
+        right: Math.min(info.rcMonitor.right, clip.right), bottom: Math.min(info.rcMonitor.bottom, clip.bottom),
+      };
+    },
+    move(point): void {
+      const left = api.GetSystemMetrics(76) as number;
+      const top = api.GetSystemMetrics(77) as number;
+      const absolute = absoluteMousePoint(point, {
+        left, top, right: left + (api.GetSystemMetrics(78) as number), bottom: top + (api.GetSystemMetrics(79) as number),
+      });
+      const input = { type: 0, mi: { dx: absolute.x, dy: absolute.y, mouseData: 0, dwFlags: POINTER_INPUT_FLAGS, time: 0, dwExtraInfo: 0 } };
+      if (api.SendInput(1, [input], api.koffi.sizeof(api.MOUSE_INPUT)) !== 1) throw new Error("SendInput failed");
+    },
+  });
+  return port;
 }
 
 function emptyPlacement(api: Win32Api): any {

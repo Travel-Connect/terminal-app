@@ -214,6 +214,18 @@ body {
   color: var(--accent);
 }
 
+/* Codex の識別表示。状態を示す色と混ざらない控えめなラベル */
+.tile-provider {
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 /* 今やっているタスク（260922_10）: Claude Code が書く ai-title。名前より控えめに、1 行で省略 */
 .tile-task {
   font-size: 10px;

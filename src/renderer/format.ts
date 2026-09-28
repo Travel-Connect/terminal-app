@@ -48,7 +48,13 @@ export function fmtStatusCounts(counts: StatusCounts): string {
  * 規則: ウィンドウが無く、かつ実行中・確認待ちでもないタイルだけを未接続にする —
  * タイトル一致の偽陰性（タブ切替でタイトルが変わる等）で作業中のタイルを灰色化・非表示にしないため。
  */
-export function isUnlinked(present: boolean | undefined, state: SessionState | undefined): boolean {
+export function isUnlinked(
+  present: boolean | undefined,
+  state: SessionState | undefined,
+  provider?: SessionView["provider"],
+): boolean {
+  // Codex は自身のセッション記録で状態が分かるため、Cursor のウィンドウ有無では隠さない
+  if (provider === "codex") return false;
   if (present !== false) return false;
   return state !== "running" && state !== "confirm";
 }

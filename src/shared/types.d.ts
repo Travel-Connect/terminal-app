@@ -75,12 +75,18 @@ export interface AppConfig {
    * Claude Sonnet の提案で自動的に付け替える。false で止められる（config.json を編集。既定 true）
    */
   autoRename?: boolean;
+  /** Codex のローカル履歴を読み取り、登録済みプロジェクトのタイルに表示する。既定 true */
+  monitorCodex?: boolean;
 }
 
 /** セッション状態（メモリのみ・揮発。design.md 9 章） */
 export interface SessionView {
   sessionId: string;
   projectId: string;
+  /** 未指定は従来の Claude Code。Codex は独立した読み取り監視から届く */
+  provider?: "claude" | "codex";
+  /** 終了を確認したターミナルの履歴。生存・未確認の場合は省略し、分割表示の対象から外す */
+  terminalClosed?: boolean;
   state: SessionState;
   /** 最終イベント時刻（epoch ms）。相対時刻表示の起点 */
   lastEventAt: number;

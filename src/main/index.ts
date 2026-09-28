@@ -19,6 +19,7 @@ import * as path from "path";
 import type { ClickTarget, DropPayload, FocusProjectOptions, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
+import { CodexMonitor, codexMonitoringEnabled, mergeCodexViews } from "./codex-monitor";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
@@ -120,6 +121,7 @@ if (process.env.TERMINAL_APP_DATA_DIR) {
 const logger = new Logger(dataDir);
 const projectStore = new ProjectStore(dataDir, logger);
 const stateStore = new StateStore();
+const codexMonitor = new CodexMonitor();
 /**
  * Jev（TypeSafe AI の判断専用モデル）クライアント（260922_2）。デモ・env TERMINAL_APP_JEV=off・キー無しでは
  * 常に「判定なし」= 従来の表示ロジックだけで動く。判定は追加層（返答待ち／危険度／作業テキスト／停滞）
@@ -140,8 +142,10 @@ function buildSnapshot(): Snapshot {
   const config = { ...projectStore.config };
   if (themeOverride !== undefined) config.theme = themeOverride;
   const projects = projectStore.projects;
-  const sessions = stateStore.displaySessions(projects);
-  const splitSessions = stateStore.splitSessions(projects);
+  const { sessions, splitSessions } = mergeCodexViews(projects, {
+    sessions: stateStore.displaySessions(projects),
+    splitSessions: stateStore.splitSessions(projects),
+  }, codexMonitor.sessions);
   // 件数は「画面に出るタイル」基準（260904_1 #3: 分割タイルはそれぞれ 1 件）。renderer は表示整形のみ行う
   const tiles: SessionView[] = [];
   for (const p of projects) {
@@ -633,6 +637,19 @@ function createAppEventServer(): EventServer {
 /* ---------------- 切断検知（260712_2） ---------------- */
 
 let livenessTimer: NodeJS.Timeout | null = null;
+let codexPollTimer: NodeJS.Timeout | null = null;
+let codexWasAvailable: boolean | undefined;
+
+function pollCodexSessions(): void {
+  if (!codexMonitoringEnabled(projectStore.config.monitorCodex)) return;
+  const changed = codexMonitor.refresh(projectStore.projects);
+  if (codexWasAvailable !== codexMonitor.available) {
+    codexWasAvailable = codexMonitor.available;
+    // 会話名・本文はログに出さない。
+    logger.info(`Codex 監視: ${codexMonitor.available ? "ローカル履歴に接続" : "履歴を取得できません（次回再試行）"}`);
+  }
+  if (changed) broadcast();
+}
 /** 未接続タイル（260903_1）のウィンドウ有無ポーリング */
 let windowPollTimer: NodeJS.Timeout | null = null;
 /** 初回判定済みか（初回ログの要約用） */
@@ -640,6 +657,10 @@ let windowPollDone = false;
 
 const appRestarter = createAppRestarter({
   cleanup: async () => {
+    if (codexPollTimer !== null) {
+      clearInterval(codexPollTimer);
+      codexPollTimer = null;
+    }
     // app.exit() は will-quit を発火しないため、再起動経路では定期処理とサーバを明示的に止める。
     if (livenessTimer !== null) {
       clearInterval(livenessTimer);
@@ -1049,12 +1070,15 @@ async function unregisterProjectById(id: string): Promise<OpResult> {
 function reconnectProject(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
+  codexMonitor.reconnect(id);
+  pollCodexSessions();
+  const codexCount = codexMonitor.sessions.filter((s) => s.projectId === id).length;
   const r = restoreProjectSessions(project, readSessionRegistry());
   const detail = r.concluded.length > 0 ? `（うち終了済み → 完了 ${r.concluded.length} 件）` : "";
   logger.info(`再接続: ${project.name} — 走査 ${r.found} 件 / 復元 ${r.revived} 件${detail}`);
   setStatus(
-    r.revived > 0
-      ? `再接続: ${project.name} のセッション ${r.revived} 件を復元しました${detail}`
+    r.revived + codexCount > 0
+      ? `再接続: ${project.name} のセッション ${r.revived + codexCount} 件を復元しました${detail}`
       : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
   );
   // 完了で復元したものは Jev で「返答待ち」かを一括判定（260922_3）
@@ -1310,6 +1334,9 @@ function clearProjectDisplay(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
   stateStore.removeProjectSessions(id);
+  for (const session of [...codexMonitor.sessions]) {
+    if (session.projectId === id) codexMonitor.hide(session.sessionId);
+  }
   logger.info(`表示クリア: ${project.name}`);
   setStatus(`${project.name} の表示をクリアしました`);
 }
@@ -1318,7 +1345,7 @@ function clearProjectDisplay(id: string): void {
 function removeSessionDisplay(id: string, sessionId: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
-  if (!stateStore.removeSession(sessionId)) return;
+  if (!codexMonitor.hide(sessionId) && !stateStore.removeSession(sessionId)) return;
   deadStrikes.delete(sessionId);
   lastNotifiedState.delete(sessionId);
   logger.info(`枠を消去: ${project.name} (session=${sessionId})`);
@@ -1867,6 +1894,11 @@ void app.whenReady().then(async () => {
   );
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
+    pollCodexSessions();
+    if (codexMonitoringEnabled(projectStore.config.monitorCodex)) {
+      const interval = Number(process.env.TERMINAL_APP_CODEX_POLL_MS ?? "5000");
+      codexPollTimer = setInterval(pollCodexSessions, Number.isFinite(interval) && interval >= 250 ? interval : 5000);
+    }
     restoreSessionSnapshot(); // 前回の表示を復元（260922_7）— transcript 走査より先に取り込み、続きから見えるようにする
     void restoreSessionsAtStartup(); // 起動時復元（260922_3）: 待機になった全タイルを transcript と登録簿から復元し、Jev で返答待ちを拾う
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
@@ -1881,6 +1913,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  if (codexPollTimer !== null) clearInterval(codexPollTimer);
   if (snapshotSaveTimer !== null) clearTimeout(snapshotSaveTimer);
   writeSessionSnapshot(); // 次回起動で続きから見えるように最後の状態を残す（260922_7）
   if (livenessTimer !== null) clearInterval(livenessTimer);

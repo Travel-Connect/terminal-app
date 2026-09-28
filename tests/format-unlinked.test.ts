@@ -29,6 +29,16 @@ describe("isUnlinked（260903_1）", () => {
     expect(isUnlinked(undefined, undefined)).toBe(false);
     expect(isUnlinked(undefined, "done")).toBe(false);
   });
+
+  it("Codex の完了・エラーは Cursor のウィンドウが無くても灰色化・非表示にしない", () => {
+    expect(isUnlinked(false, "done", "codex")).toBe(false);
+    expect(isUnlinked(false, "error", "codex")).toBe(false);
+  });
+
+  it("Claude と既存セッションの未接続判定は変えない", () => {
+    expect(isUnlinked(false, "done", "claude")).toBe(true);
+    expect(isUnlinked(false, "done", undefined)).toBe(true);
+  });
 });
 
 describe("fmtUnlinkedLabel（260903_1）", () => {
