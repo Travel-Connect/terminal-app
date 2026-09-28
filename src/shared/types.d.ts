@@ -85,6 +85,8 @@ export interface SessionView {
   projectId: string;
   /** 未指定は従来の Claude Code。Codex は独立した読み取り監視から届く */
   provider?: "claude" | "codex";
+  /** 終了を確認したターミナルの履歴。生存・未確認の場合は省略し、分割表示の対象から外す */
+  terminalClosed?: boolean;
   state: SessionState;
   /** 最終イベント時刻（epoch ms）。相対時刻表示の起点 */
   lastEventAt: number;

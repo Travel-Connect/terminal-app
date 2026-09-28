@@ -3,6 +3,8 @@ import * as path from "node:path";
 import type { Project, SessionView, Snapshot } from "../shared/types";
 import { readCodexSessions, type CodexReadResult } from "./codex-session-reader";
 import { matchProjectByCwd } from "./state-store";
+import { readCodexLiveness } from "./codex-liveness";
+import type { Liveness } from "./session-registry";
 
 export function codexHome(): string {
   return process.env.TERMINAL_APP_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
@@ -27,11 +29,15 @@ export class CodexMonitor {
   private views: SessionView[] = [];
   private hidden = new Map<string, { at: number; projectId: string }>();
   private lastSuccessAt = 0;
+  private deadStrikes = new Map<string, number>();
+  private closedIds = new Set<string>();
+  private openIds = new Set<string>();
   available = false;
 
   constructor(
     private readonly read: Reader = () => readCodexSessions({ codexHome: codexHome() }),
     private readonly now: () => number = Date.now,
+    private readonly liveness: (sessionId: string) => Liveness = (id) => readCodexLiveness(codexHome(), id),
   ) {}
 
   get sessions(): readonly SessionView[] { return this.views; }
@@ -57,6 +63,14 @@ export class CodexMonitor {
       if (project === null) continue;
       const sessionId = `codex:${record.sessionId}`;
       liveIds.add(sessionId);
+      const life = this.liveness(record.sessionId);
+      if (life === "dead") this.deadStrikes.set(sessionId, Math.min(2, (this.deadStrikes.get(sessionId) ?? 0) + 1));
+      else this.deadStrikes.delete(sessionId);
+      if (life === "alive") this.closedIds.delete(sessionId);
+      else if ((this.deadStrikes.get(sessionId) ?? 0) >= 2) this.closedIds.add(sessionId);
+      const closed = this.closedIds.has(sessionId);
+      if (life === "alive") this.openIds.add(sessionId);
+      else if (closed) this.openIds.delete(sessionId);
       const hiddenAt = this.hidden.get(sessionId);
       if (hiddenAt !== undefined && record.lastEventAt > hiddenAt.at) this.hidden.delete(sessionId);
       const view: SessionView = {
@@ -65,19 +79,36 @@ export class CodexMonitor {
         runningSince: record.runningSince, taskTitle: record.taskTitle,
         workText: record.workText, confirmKind: record.confirmKind,
       };
+      if (closed) {
+        view.terminalClosed = true;
+        if (view.state === "running" || view.state === "confirm") {
+          view.state = "disconnected";
+          delete view.runningSince;
+          delete view.confirmKind;
+        }
+      }
       const list = grouped.get(project.id) ?? [];
       list.push(view);
       grouped.set(project.id, list);
     }
     for (const id of this.hidden.keys()) if (!liveIds.has(id)) this.hidden.delete(id);
+    for (const id of this.deadStrikes.keys()) if (!liveIds.has(id)) this.deadStrikes.delete(id);
+    for (const id of this.closedIds) if (!liveIds.has(id)) this.closedIds.delete(id);
+    for (const id of this.openIds) if (!liveIds.has(id)) this.openIds.delete(id);
     const next: SessionView[] = [];
     for (const list of grouped.values()) {
-      const active = list.filter((s) => s.state === "running" || s.state === "confirm");
-      // 履歴の会話すべてをタイル化しない。作業中は全件、終了済みは直近の 1 件だけ。
-      const latestFinished = list.filter((s) => s.state !== "running" && s.state !== "confirm")
+      // 生存確認済みなら、応答完了後の入力待ちも開いているターミナルとして数える。
+      // 判定不能の旧版だけ従来の履歴選定を使う。閉じた履歴は分割数に加えない。
+      const active = list.filter((s) => !s.terminalClosed &&
+        (this.openIds.has(s.sessionId) || s.state === "running" || s.state === "confirm"));
+      const latestFinished = list.filter((s) => !s.terminalClosed && !active.includes(s))
         .sort((a, b) => b.lastEventAt - a.lastEventAt || a.sessionId.localeCompare(b.sessionId))[0];
       next.push(...active);
       if (latestFinished !== undefined) next.push(latestFinished);
+      if (active.length === 0 && latestFinished === undefined) {
+        const latestClosed = [...list].sort((a, b) => b.lastEventAt - a.lastEventAt || a.sessionId.localeCompare(b.sessionId))[0];
+        if (latestClosed !== undefined) next.push(latestClosed);
+      }
     }
     // 表示候補を先に選ぶ。隠した最新完了を古い完了で埋め直すと「表示クリア」が効かなくなる。
     const visible = next.filter((s) => !this.hidden.has(s.sessionId));
@@ -117,7 +148,10 @@ export function mergeCodexViews(
     if (additions.length === 0) continue;
     const primary = sessions[project.id];
     const existing = splitSessions[project.id] ?? (primary === undefined ? [] : [primary]);
-    const list = [...existing, ...additions].sort((a, b) =>
+    const candidates = [...existing, ...additions];
+    const open = candidates.filter((s) => !s.terminalClosed);
+    // 全部閉じた場合だけ最後の状態を 1 枚残す。別 provider の終了履歴を分割へ戻さない。
+    const list = (open.length > 0 ? open : [...candidates].sort((a, b) => b.lastEventAt - a.lastEventAt).slice(0, 1)).sort((a, b) =>
       (a.firstSeenAt ?? a.lastEventAt) - (b.firstSeenAt ?? b.lastEventAt) || a.sessionId.localeCompare(b.sessionId),
     );
     sessions[project.id] = [...list].sort((a, b) =>
