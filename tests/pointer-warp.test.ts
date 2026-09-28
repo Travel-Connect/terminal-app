@@ -22,6 +22,7 @@ function fakePort(initial: PointerState): { port: PointerPort; state: PointerSta
   const calls: string[] = [];
   const rects: Record<string, typeof RECT_A> = { A: RECT_A, B: RECT_B };
   const port: PointerPort = {
+    cancelJiggle: () => {},
     windowRect: (h) => rects[h as string] ?? null,
     cursor: () => ({ pos: { ...state.pos }, flags: state.flags }),
     setCursorPos: (x, y) => {
@@ -149,6 +150,31 @@ describe("PointerWarper.warpTo", () => {
 });
 
 describe("PointerWarper.reveal", () => {
+  it("最後の入力送信直後ではなく、非同期の再表示を待って観測する", () => {
+    const { port, state } = fakePort({ pos: { x: 500, y: 400 }, flags: 0 });
+    const start = Date.now();
+    const events: WarpEvent[] = [];
+    port.jiggle = () => {
+      if (Date.now() >= start + 300) setTimeout(() => { state.flags = CURSOR_SHOWING; }, 70);
+    };
+    new PointerWarper({ port }).reveal((event) => events.push(event));
+    vi.advanceTimersByTime(300);
+    expect(events.some((event) => event.kind === "final")).toBe(false);
+    vi.advanceTimersByTime(100);
+    expect(events.at(-1)).toMatchObject({ kind: "final", delayMs: 400 });
+    expect(events.at(-1)?.message).toContain("表示中");
+  });
+
+  it("入力送信失敗を通知し、タイマーから例外を漏らさない", () => {
+    const { port } = fakePort({ pos: { x: 500, y: 400 }, flags: 0 });
+    const events: WarpEvent[] = [];
+    port.jiggle = () => { throw new Error("SendInput failed"); };
+    expect(() => new PointerWarper({ port }).reveal((event) => events.push(event))).not.toThrow();
+    expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+    expect(events.filter((event) => event.kind === "failed")).toHaveLength(2);
+    expect(events.at(-1)?.message).toContain("非表示");
+  });
+
   it("抑制中なら位置を変えずに再表示する", () => {
     const { port, state, calls } = fakePort({ pos: { x: 5000, y: 5000 }, flags: CURSOR_SUPPRESSED });
     const events: WarpEvent[] = [];
