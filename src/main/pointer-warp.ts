@@ -48,7 +48,7 @@ export const POINTER_WARP_RETRY_DELAYS_MS: readonly number[] = [0, 120, 300, 600
 /** 再表示だけの再試行タイミング（ms）。前面化失敗時・タイル外のタッチ終了時に使う */
 export const POINTER_REVEAL_RETRY_DELAYS_MS: readonly number[] = [0, 300];
 
-export type WarpAttempt = "warped" | "kept" | "failed";
+export type WarpAttempt = "warped" | "revealed" | "kept" | "failed";
 
 export interface WarpEvent {
   kind: "retry" | "failed" | "final";
@@ -106,8 +106,8 @@ export class PointerWarper {
 
   /**
    * 対象ウィンドウの中央へ移す。即時 1 回 + 遅延つき再試行（まだ矩形外にいる時だけ移し直す。
-   * すでに中にいるなら触らない＝ユーザーが動かし始めたマウスを邪魔しない）。
-   * 最後の試行後に GetCursorInfo の状態を final として報告する（診断用）
+   * すでに中にいるなら再配置せず、非表示の場合だけ再表示する）。
+   * 最後の試行から 100ms 後に GetCursorInfo の状態を final として報告する（診断用）
    */
   warpTo(handle: unknown, onEvent?: (ev: WarpEvent) => void): void {
     this.cancel();
@@ -121,15 +121,17 @@ export class PointerWarper {
         const outcome = this.warpOnce(handle, delay > 0);
         if (outcome === "warped" && delay > 0) {
           onEvent?.({ kind: "retry", attempt: attempts, delayMs: delay, message: `ポインター移動をやり直し ${attempts} 回目（${delay}ms 後、まだ対象の外だった）` });
+        } else if (outcome === "revealed") {
+          onEvent?.({ kind: "retry", attempt: attempts, delayMs: delay, message: `ポインター再表示をやり直し ${attempts} 回目（${delay}ms 後、対象内だが非表示だった）` });
         } else if (outcome === "failed") {
           onEvent?.({ kind: "failed", attempt: attempts, delayMs: delay, message: `ポインター移動に失敗（${delay}ms 後）` });
         }
         if (delay === last) {
-          // 最終確認: まだ抑制中なら念押しで再表示し、状態を報告する
-          const state = this.port.cursor();
-          if (state?.flags !== null && state !== null && (state.flags & CURSOR_SUPPRESSED) !== 0) this.port.jiggle();
-          const after = this.port.cursor();
-          onEvent?.({ kind: "final", attempt: attempts, delayMs: delay, message: `ポインター最終状態: ${describePointerState(after, this.port.windowRect(handle))}` });
+          // 擬似入力の送信直後ではなく、OS が入力を処理する猶予を置いて観測する。
+          this.schedule(() => {
+            if (gen !== this.generation) return;
+            onEvent?.({ kind: "final", attempt: attempts, delayMs: delay + 100, message: `ポインター最終状態: ${describePointerState(this.port.cursor(), this.port.windowRect(handle))}` });
+          }, 100);
         }
       };
       this.schedule(run, delay);
@@ -176,7 +178,14 @@ export class PointerWarper {
       if (rc === null) return "failed";
       if (onlyIfOutside) {
         const state = this.port.cursor();
-        if (state !== null && pointInRect(state.pos, rc)) return "kept";
+        if (state !== null && pointInRect(state.pos, rc)) {
+          // flags=0（通常の非表示）も回復対象。位置が正しくても表示は別に判定する。
+          if (state.flags !== null && ((state.flags & CURSOR_SHOWING) === 0 || (state.flags & CURSOR_SUPPRESSED) !== 0)) {
+            this.port.jiggle();
+            return "revealed";
+          }
+          return "kept";
+        }
       }
       this.port.setCursorPos(Math.round((rc.left + rc.right) / 2), Math.round((rc.top + rc.bottom) / 2));
       // SetCursorPos だけではタッチで隠れたポインターが再表示されないため、擬似マウス移動で再表示させる

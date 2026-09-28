@@ -96,19 +96,47 @@ describe("PointerWarper.warpTo", () => {
     expect(calls.filter((c) => c === "set:2500,400").length).toBe(1);
   });
 
-  it("最終時点でまだ抑制中なら念押しで再表示する", () => {
+  it.each([0, CURSOR_SUPPRESSED])("対象内でも非表示が続けば各試行で再表示する（flags=%i）", (flags) => {
     const { port, state, calls } = fakePort({ pos: { x: 5000, y: 5000 }, flags: CURSOR_SUPPRESSED });
     const events: WarpEvent[] = [];
     // jiggle が効かない環境を模す（抑制が解けない）
     port.jiggle = () => {
       calls.push("jiggle");
-      state.flags = CURSOR_SUPPRESSED;
+      state.flags = flags;
     };
     new PointerWarper({ port }).warpTo("A", (ev) => events.push(ev));
     vi.advanceTimersByTime(2000);
-    // 即時の 1 回 + 最終の念押し
-    expect(calls.filter((c) => c === "jiggle").length).toBe(2);
-    expect(events.at(-1)?.message).toContain("タッチで抑制中");
+    expect(calls.filter((c) => c === "jiggle").length).toBe(5);
+    expect(calls.filter((c) => c.startsWith("set:"))).toEqual(["set:500,400"]);
+    expect(events.at(-1)?.message).toContain(flags === 0 ? "非表示" : "タッチで抑制中");
+  });
+
+  it("最後の再表示が非同期に反映された状態を報告する", () => {
+    const { port, state } = fakePort({ pos: { x: 500, y: 400 }, flags: 0 });
+    const events: WarpEvent[] = [];
+    port.jiggle = () => {
+      if (Date.now() >= start + 1000) {
+        setTimeout(() => { state.flags = CURSOR_SHOWING; }, 50);
+      }
+    };
+    const start = Date.now();
+    new PointerWarper({ port }).warpTo("A", (ev) => events.push(ev));
+    vi.advanceTimersByTime(1000);
+    expect(events.some((e) => e.kind === "final")).toBe(false);
+    vi.advanceTimersByTime(100);
+    expect(events.at(-1)).toMatchObject({ kind: "final", delayMs: 1100 });
+    expect(events.at(-1)?.message).toContain("表示中");
+  });
+
+  it("次のタップは前の最終観測も取り消す", () => {
+    const { port } = fakePort({ pos: { x: 500, y: 400 }, flags: CURSOR_SHOWING });
+    const events: WarpEvent[] = [];
+    const w = new PointerWarper({ port });
+    w.warpTo("A", (ev) => events.push(ev));
+    vi.advanceTimersByTime(1000);
+    w.warpTo("B");
+    vi.advanceTimersByTime(2000);
+    expect(events.some((e) => e.kind === "final")).toBe(false);
   });
 
   it("矩形が取れなければ failed を報告し、例外を投げない", () => {
@@ -140,7 +168,7 @@ describe("PointerWarper.reveal", () => {
     expect(events.at(-1)?.message).toContain("不要");
   });
 
-  it("進行中の warpTo を取り消さない（タイル上の pointerup → click の順で呼ばれるため）", () => {
+  it("warpTo の後に reveal が届いても移動の再試行を取り消さない", () => {
     const { port, state, calls } = fakePort({ pos: { x: 5000, y: 5000 }, flags: CURSOR_SUPPRESSED });
     const w = new PointerWarper({ port });
     w.warpTo("A");
@@ -148,6 +176,22 @@ describe("PointerWarper.reveal", () => {
     state.pos = { x: 5000, y: 5000 };
     vi.advanceTimersByTime(2000);
     expect(calls.filter((c) => c === "set:500,400").length).toBeGreaterThan(1);
+  });
+
+  it("pointerup → click の順で reveal が取り消されても warpTo が再表示を引き継ぐ", () => {
+    const { port, state, calls } = fakePort({ pos: { x: 5000, y: 5000 }, flags: CURSOR_SUPPRESSED });
+    const w = new PointerWarper({ port });
+    w.reveal();
+    w.warpTo("A");
+    // タッチ処理が遅れて非表示に戻す。ユーザーが対象内で動かした位置は維持する。
+    state.pos = { x: 700, y: 600 };
+    state.flags = 0;
+    vi.advanceTimersByTime(120);
+    expect(state.flags).toBe(CURSOR_SHOWING);
+    expect(state.pos).toEqual({ x: 700, y: 600 });
+    expect(calls).toEqual(["jiggle", "set:500,400", "jiggle", "jiggle"]);
+    vi.advanceTimersByTime(2000);
+    expect(calls).toHaveLength(4);
   });
 });
 
