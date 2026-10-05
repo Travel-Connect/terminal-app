@@ -3,6 +3,7 @@
 Claude Code の並行セッションを監視する Windows 11 常駐タイルダッシュボード（Electron）。
 **どのセッションが止まったかをひと目で識別し、1 クリックで対象ウィンドウ（Cursor / ターミナル）に切り替える。**
 
+- [Cursor → Orca の移行記録](docs/cursor-to-orca-migration.md)／[クロコマース向けワンショット依頼文](docs/kurocommerce-orca-one-shot.md)
 - 要件: `docs/spec.md`（REQ / NFR / AC / OPEN の正本）
 - 設計: `docs/design.md`（モジュール分割・hooks 連携・UI はモック面 1a〜1f 準拠）
 - 検証: `docs/verification.md`（V-01〜V-20）／実行記録: `docs/verification-results.md`
