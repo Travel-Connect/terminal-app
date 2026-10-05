@@ -64,6 +64,7 @@ export type PlacementResult = { ok: true; placement: WindowPlacementInfo } | { o
 /** clickTarget → 対象プロセス exe 名（design.md 7.1） */
 const TARGET_EXES: Record<ClickTarget, string[]> = {
   cursor: ["cursor.exe"],
+  orca: ["orca.exe"],
   terminal: [
     "windowsterminal.exe",
     "conhost.exe",
@@ -266,9 +267,24 @@ export function listTopLevelWindows(): TopLevelWindow[] {
  * 呼び出し側（liveness-monitor）は「消失」を単独の切断根拠にしないこと。
  */
 export function hasWindowFor(target: ClickTarget, folderName: string, windows: readonly TopLevelWindow[]): boolean {
+  return pickTargetWindow(target, folderName, windows) !== undefined;
+}
+
+/**
+ * 対象ウィンドウの選択（Z 順の配列から）。
+ * - cursor / terminal: exe 名 ＋ タイトルに folder 名（design.md 7.1）
+ * - orca（261005_1）: Orca は 1 枚の窓に全フォルダを載せ、タイトルは常に "Orca" — folder 名では探さない。
+ *   タイトルがちょうど "Orca" の窓（メイン窓）を優先し、無ければ orca.exe の窓（ポップアウト等）。
+ *   フォルダが Orca で開かれているかは orca.ts（CLI の worktree 一覧）が判定する
+ */
+function pickTargetWindow<T extends TopLevelWindow>(target: ClickTarget, folderName: string, windows: readonly T[]): T | undefined {
   const wanted = TARGET_EXES[target];
+  if (target === "orca") {
+    const own = windows.filter((w) => wanted.includes(w.exe));
+    return own.find((w) => w.title.trim().toLowerCase() === "orca") ?? own[0];
+  }
   const needle = folderName.toLowerCase();
-  return windows.some((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+  return windows.find((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
 }
 
 function isForeground(api: Win32Api, hwnd: any): boolean {
@@ -286,9 +302,7 @@ function isForeground(api: Win32Api, hwnd: any): boolean {
  * EnumWindows は Z 順（手前から）のため、最初の一致 = Z オーダー最前面（design.md 7.1）
  */
 function findProjectWindow(api: Win32Api, target: ClickTarget, folderName: string): any | null {
-  const wanted = TARGET_EXES[target];
-  const needle = folderName.toLowerCase();
-  const found = enumWindows(api).find((w) => wanted.includes(w.exe) && w.title.toLowerCase().includes(needle));
+  const found = pickTargetWindow(target, folderName, enumWindows(api));
   return found === undefined ? null : found.hwnd;
 }
 
@@ -304,7 +318,7 @@ export function focusProjectWindow(target: ClickTarget, folderName: string, opti
   try {
     const hwnd = findProjectWindow(api, target, folderName);
     const outcome: FocusOutcome = hwnd === null
-      ? { ok: false, message: `ウィンドウが見つかりません（${folderName} / ${target}）` }
+      ? { ok: false, message: target === "orca" ? "Orca のウィンドウが見つかりません（Orca が起動していません）" : `ウィンドウが見つかりません（${folderName} / ${target}）` }
       : bringToForeground(api, hwnd);
     if (options.warpPointer === true) {
       // 成功: 対象ウィンドウ中央へ。失敗: 位置は変えず再表示だけ（隠れたまま放置しない。260925_2）

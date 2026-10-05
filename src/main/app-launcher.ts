@@ -76,6 +76,8 @@ export function resolveLaunchCommand(
     const exe = cursorCandidates(deps).find(deps.exists);
     return exe !== undefined ? { exe, args: [projectPath] } : null;
   }
+  // Orca は exe 起動でフォルダを開けない（起動引数は文書ファイルのみ）。CLI 経由の orca.ts launchInOrca を使う
+  if (target === "orca") return null;
   const exe = terminalCandidates(deps).find(deps.exists);
   return exe !== undefined ? { exe, args: ["-d", projectPath] } : null;
 }
@@ -127,7 +129,9 @@ export function launchProjectApp(target: ClickTarget, projectPath: string): Laun
       message:
         target === "cursor"
           ? "Cursor が見つかりません（Cursor.exe を解決できませんでした）"
-          : "Windows Terminal（wt.exe）が見つかりません",
+          : target === "orca"
+            ? "Orca の立ち上げは Orca の CLI 経由で行います"
+            : "Windows Terminal（wt.exe）が見つかりません",
     };
   }
   try {

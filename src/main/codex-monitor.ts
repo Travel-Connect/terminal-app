@@ -1,13 +1,96 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Project, SessionView, Snapshot } from "../shared/types";
-import { readCodexSessions, type CodexReadResult } from "./codex-session-reader";
+import { readCodexSessions, type CodexReadResult, type CodexSessionRecord } from "./codex-session-reader";
 import { matchProjectByCwd } from "./state-store";
 import { readCodexLiveness } from "./codex-liveness";
+import { orcaCodexHome } from "./orca";
 import type { Liveness } from "./session-registry";
 
 export function codexHome(): string {
   return process.env.TERMINAL_APP_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+}
+
+/**
+ * 読み取る Codex の保存先一覧（261005_1）。通常の CODEX_HOME に加え、Orca が Codex に渡す専用の
+ * CODEX_HOME（%APPDATA%\orca\codex-runtime-home\home）も読む。Orca 側の会話は jsonl こそ ~/.codex と
+ * 共有されるが、状態 DB（state_5.sqlite）は別ファイルで、~/.codex 側に載らないスレッドがあるため。
+ * 検証用の TERMINAL_APP_CODEX_HOME 指定時はそれだけを読む
+ */
+export function codexHomes(): string[] {
+  if (process.env.TERMINAL_APP_CODEX_HOME) return [process.env.TERMINAL_APP_CODEX_HOME];
+  // 本アプリを Orca のターミナルから起動すると CODEX_HOME が Orca 用を指すため、~/.codex も常に読む
+  const homes: string[] = [];
+  for (const home of [codexHome(), path.join(os.homedir(), ".codex"), orcaCodexHome()]) {
+    if (home === null) continue;
+    if (!homes.some((h) => path.resolve(h).toLowerCase() === path.resolve(home).toLowerCase())) homes.push(home);
+  }
+  return homes;
+}
+
+/**
+ * 複数の保存先をまとめて読む。同じスレッドが複数の DB にあれば最終更新の新しい方を採る。
+ * 生存判定は「そのスレッドが見つかった保存先」のロックだけで行う（Codex は実行中の home にだけロックを置く）
+ */
+export class CodexHomesSource {
+  private foundIn = new Map<string, string[]>();
+  /** 保存先ごとの直近の成功結果。一時的な読み取り失敗（DB ロック等）の間はこれで代用する */
+  private lastGood = new Map<string, { result: CodexReadResult; at: number }>();
+
+  constructor(
+    private readonly homes: () => string[] = codexHomes,
+    private readonly readHome: (home: string) => CodexReadResult = (home) => readCodexSessions({ codexHome: home }),
+    private readonly livenessIn: (home: string, sessionId: string) => Liveness = readCodexLiveness,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  read(): CodexReadResult {
+    const merged = new Map<string, CodexSessionRecord>();
+    const foundIn = new Map<string, string[]>();
+    let available = false;
+    let error: string | undefined;
+    for (const home of this.homes()) {
+      let result = this.readHome(home);
+      if (result.available) {
+        this.lastGood.set(home, { result, at: this.now() });
+      } else {
+        error ??= result.error;
+        // 片方だけ読めない間に、その保存先の会話を消したり別の保存先の lock だけで終了と判定したりしない。
+        // 単一保存先のときと同じ 30 秒の猶予の間は直近の成功結果を使う（それを過ぎたら外す）
+        const cached = this.lastGood.get(home);
+        if (cached === undefined || this.now() - cached.at >= HOME_READ_GRACE_MS) continue;
+        result = cached.result;
+      }
+      available = true;
+      for (const record of result.sessions) {
+        foundIn.set(record.sessionId, [...(foundIn.get(record.sessionId) ?? []), home]);
+        const prev = merged.get(record.sessionId);
+        if (prev === undefined || record.lastEventAt > prev.lastEventAt) merged.set(record.sessionId, record);
+      }
+    }
+    this.foundIn = foundIn;
+    if (!available) return error === undefined ? { available: false, sessions: [] } : { available: false, sessions: [], error };
+    return { available: true, sessions: [...merged.values()] };
+  }
+
+  /** alive が 1 つでもあれば alive、判定不能が混じれば unknown、全部 dead のときだけ dead */
+  liveness(sessionId: string): Liveness {
+    const homes = this.foundIn.get(sessionId) ?? this.homes().slice(0, 1);
+    const results = homes.map((home) => this.livenessIn(home, sessionId));
+    if (results.includes("alive")) return "alive";
+    if (results.includes("unknown") || results.length === 0) return "unknown";
+    return "dead";
+  }
+}
+
+/** 保存先ごとの読み取り失敗を一時的とみなす猶予（CodexMonitor の全体失敗の猶予と同じ 30 秒） */
+const HOME_READ_GRACE_MS = 30_000;
+
+const defaultSource = new CodexHomesSource();
+
+/** Codex のスレッド（"codex:" 接頭辞なし）が今も開いているか（writer lock。Orca への送信可否の確認に使う） */
+export function codexSessionLiveness(threadId: string): Liveness {
+  return defaultSource.liveness(threadId);
 }
 
 /** 別 dataDir の検証では、明示的な Codex fixture がない限り実履歴を読まない。 */
@@ -35,9 +118,9 @@ export class CodexMonitor {
   available = false;
 
   constructor(
-    private readonly read: Reader = () => readCodexSessions({ codexHome: codexHome() }),
+    private readonly read: Reader = () => defaultSource.read(),
     private readonly now: () => number = Date.now,
-    private readonly liveness: (sessionId: string) => Liveness = (id) => readCodexLiveness(codexHome(), id),
+    private readonly liveness: (sessionId: string) => Liveness = (id) => defaultSource.liveness(id),
   ) {}
 
   get sessions(): readonly SessionView[] { return this.views; }
