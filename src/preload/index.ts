@@ -3,7 +3,7 @@
  * 型定義は src/shared/types.d.ts の TerminalAppApi を正とする。
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ClickTarget, DropPayload, FocusProjectOptions, Snapshot, TerminalAppApi, ThemeSetting, WindowAction } from "../shared/types";
+import type { ClickTarget, DropPayload, FocusProjectOptions, OrcaInputPayload, Snapshot, TerminalAppApi, ThemeSetting, WindowAction } from "../shared/types";
 
 const api: TerminalAppApi = {
   getSnapshot: () => ipcRenderer.invoke("get-snapshot"),
@@ -13,6 +13,10 @@ const api: TerminalAppApi = {
   dndLog: (msg: string) => ipcRenderer.send("dnd-log", msg),
   unregisterProject: (id: string) => ipcRenderer.invoke("unregister-project", id),
   setClickTarget: (id: string, target: ClickTarget) => ipcRenderer.invoke("set-click-target", id, target),
+  setAllClickTargets: (target: ClickTarget) => ipcRenderer.invoke("set-all-click-targets", target),
+  sessionInstructions: (id: string, sessionId?: string) => ipcRenderer.invoke("session-instructions", id, sessionId),
+  orcaReadScreen: (id: string, sessionId?: string) => ipcRenderer.invoke("orca-read-screen", id, sessionId),
+  orcaSend: (id: string, sessionId: string | undefined, input: OrcaInputPayload) => ipcRenderer.invoke("orca-send", id, sessionId, input),
   setProjectStatus: (id: string, status: string | null) => ipcRenderer.invoke("set-project-status", id, status),
   setCustomStatuses: (list: string[]) => ipcRenderer.invoke("set-custom-statuses", list),
   setProjectName: (id: string, name: string) => ipcRenderer.invoke("set-project-name", id, name),
@@ -35,6 +39,9 @@ const api: TerminalAppApi = {
   },
   onRenameRequest: (cb: (projectId: string) => void) => {
     ipcRenderer.on("rename-request", (_event, projectId: string) => cb(projectId));
+  },
+  onOrcaPanelRequest: (cb: (projectId: string, sessionId: string | null) => void) => {
+    ipcRenderer.on("orca-panel-request", (_event, projectId: string, sessionId: string | null) => cb(projectId, sessionId));
   },
   // Electron 32+ では File.path が使えないため webUtils で D&D のパスを解決する（REQ-01）
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
