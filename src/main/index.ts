@@ -79,7 +79,7 @@ import {
   turnEndOf,
 } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
@@ -98,6 +98,7 @@ import {
   fetchOrcaWorktrees,
   launchInOrca,
   openChangedInOrca,
+  orcaSleepingPathSet,
   orcaWorktreePathSet,
   readOrcaScreen,
   readPaneKeysBySession,
@@ -164,6 +165,16 @@ let orcaAgents = new Map<string, OrcaAgent>();
 let orcaPaneBySession = new Map<string, string>();
 /** orcaAgents を最後に取得できた時刻 */
 let orcaAgentsAt = 0;
+/**
+ * Orca でスリープ中のフォルダ（正規化済み。261005_4）。Orca の「スリープ」は専用の記録を持たず、
+ * ターミナルを全部閉じる操作のため、「Orca に登録済みで生きているターミナルが 0」をスリープ中とみなす
+ */
+let orcaSleepingPaths = new Set<string>();
+
+/** Orca 対象のプロジェクトが Orca でスリープ中か */
+function isOrcaSleeping(project: Project): boolean {
+  return project.clickTarget === "orca" && orcaSleepingPaths.has(normalizePath(project.path));
+}
 
 /** NFR-01 計測: revision → イベント受信時刻。renderer の描画完了通知でログ差分を出す（verification.md 3.2） */
 const pendingRender = new Map<number, number>();
@@ -193,6 +204,7 @@ function buildSnapshot(): Snapshot {
     pinned,
     statusMessage,
     windowPresence: { ...windowPresence },
+    sleeping: Object.fromEntries(projects.filter((p) => isOrcaSleeping(p)).map((p) => [p.id, true])),
   };
 }
 
@@ -753,7 +765,7 @@ function showSessionToast(project: Project | null, title: string, body: string):
     const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
     logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     if (!outcome.ok) focusOwnWindow();
-    else if (project.clickTarget === "orca") switchToOrcaTab(project);
+    else if (project.clickTarget === "orca" && !isOrcaSleeping(project)) switchToOrcaTab(project);
   });
   n.show();
 }
@@ -998,8 +1010,10 @@ function sweepLiveness(): void {
     changed = true;
     const project = projectStore.getProject(t.projectId);
     const name = project?.name ?? t.projectId;
-    logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶`);
-    showDisconnectToast(project, name);
+    // Orca でスリープさせた（ターミナルを閉じた）プロジェクトは意図した停止のため通知しない（261005_4）
+    const sleeping = project !== null && isOrcaSleeping(project);
+    logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶${sleeping ? "（Orca でスリープ中のため通知しない）" : ""}`);
+    if (!sleeping) showDisconnectToast(project, name);
   }
   if (changed) broadcast();
 }
@@ -1059,6 +1073,10 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
   if (!hasWindowFor("orca", "", windows)) {
     orcaPaths = null;
     setOrcaAgents(new Map(), new Map());
+    if (orcaSleepingPaths.size > 0) {
+      orcaSleepingPaths = new Set(); // Orca を閉じたら「スリープ中」ではなく未接続
+      broadcast();
+    }
     return;
   }
   orcaFetching = true;
@@ -1082,6 +1100,13 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
         : next.size !== prev.size || [...next].some((p) => !prev.has(p));
       orcaPaths = next;
       if (changed) pollWindowPresence(); // orcaFetching 中のため再取得はしない
+      // スリープ中のフォルダ（261005_4）。取得失敗のときは前回値を保つ
+      if (worktrees !== null) {
+        const sleeping = orcaSleepingPathSet(worktrees);
+        const sleepChanged = sleeping.size !== orcaSleepingPaths.size || [...sleeping].some((p) => !orcaSleepingPaths.has(p));
+        orcaSleepingPaths = sleeping;
+        if (sleepChanged) broadcast();
+      }
     })
     .finally(() => {
       orcaFetching = false;
@@ -1813,7 +1838,7 @@ function wireIpc(): void {
       project.clickTarget === "cursor"
         ? "立ち上げる（Cursor でこのフォルダを開く）"
         : project.clickTarget === "orca"
-          ? "立ち上げる（Orca でこのフォルダのターミナルを開く）"
+          ? (isOrcaSleeping(project) ? "起こす（Orca でこのフォルダのターミナルを開く）" : "立ち上げる（Orca でこのフォルダのターミナルを開く）")
           : "立ち上げる（ターミナルをこのフォルダで開く）";
     // ステータスサブメニュー（260727_1）: config.customStatuses の選択肢＋「（なし）」で解除。
     // 選択肢の追加・削除は設定画面から行う
@@ -1952,8 +1977,13 @@ function wireIpc(): void {
     });
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
-    // Orca は窓が 1 枚のため、前面化の後に押したセッションのタブへ切り替える（261005_1）
-    if (outcome.ok && project.clickTarget === "orca") switchToOrcaTab(project, options?.sessionId);
+    // Orca は窓が 1 枚のため、前面化の後に押したセッションのタブへ切り替える（261005_1）。
+    // スリープ中は切り替え先のターミナルが無い。起こすのは右クリックの「起こす」（ターミナルを作る）に任せる（261005_4）
+    if (outcome.ok && isOrcaSleeping(project)) {
+      setStatus(`${project.name} は Orca でスリープ中です。起こすときはタイル右クリック →「起こす」`);
+    } else if (outcome.ok && project.clickTarget === "orca") {
+      switchToOrcaTab(project, options?.sessionId);
+    }
     return outcome;
   });
 

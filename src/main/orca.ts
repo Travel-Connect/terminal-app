@@ -198,6 +198,15 @@ export function orcaWorktreePathSet(worktrees: readonly OrcaWorktree[]): Set<str
 }
 
 /**
+ * Orca でスリープ中のフォルダ（正規化済み。261005_4）。Orca の「スリープ」は専用の記録を持たず、
+ * そのワークスペースのターミナルを全部閉じる操作のため、「登録済みで生きているターミナルが 0」をスリープ中とみなす。
+ * liveTerminalCount を返さない版は判定できないので含めない
+ */
+export function orcaSleepingPathSet(worktrees: readonly OrcaWorktree[]): Set<string> {
+  return new Set(worktrees.filter((w) => w.liveTerminals === 0).map((w) => normalizePath(w.path)));
+}
+
+/**
  * Orca の hook 状態ファイルから「セッション ID → paneKey」を作る。
  * 読むのは providerSession.id と paneKey だけ（プロンプト等の本文は使わない）。
  * Orca 内部の形式のため、読めない・形が違う場合は空 Map（推定へフォールバック）

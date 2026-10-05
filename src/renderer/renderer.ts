@@ -73,6 +73,10 @@ const STATE_META: Record<SessionState, { label: string; icon: string; cls: strin
 
 /** 未接続タイルのツールチップ（260903_1）。復帰導線（右クリック →「立ち上げる」）まで案内する */
 const CLICK_TARGETS: ClickTarget[] = ["cursor", "orca", "terminal"];
+
+/** Orca でスリープ中のタイル（261005_4） */
+const SLEEPING_ICON = "☾";
+const SLEEPING_HINT = "Orca でスリープ中です（ターミナルを閉じて休ませている状態）。右クリック →「起こす」で再開できます";
 const TARGET_LABEL: Record<ClickTarget, string> = { cursor: "Cursor", orca: "Orca", terminal: "ターミナル" };
 
 const UNLINKED_HINT: Record<ClickTarget, string> = {
@@ -103,7 +107,8 @@ function tileStatusText(session: SessionView | undefined): string {
 /** タイルのステータス行を更新（renderGrid と 1 秒毎の時刻更新で共用。差分がある時だけ DOM を触る） */
 function updateTileStatus(el: HTMLElement, session: SessionView | undefined): void {
   const statusEl = el.querySelector(".tile-status") as HTMLElement;
-  const text = tileStatusText(session);
+  // スリープ中（261005_4）は経過時間の更新でも上書きしない
+  const text = el.classList.contains("is-sleeping") ? "スリープ中（Orca）" : tileStatusText(session);
   if (statusEl.textContent !== text) statusEl.textContent = text;
 }
 
@@ -388,13 +393,15 @@ function renderGrid(): void {
     tileSessions.set(spec.key, session);
     const state = session === undefined ? "waiting" : session.state;
     // 未接続（260903_1）: 対象アプリのウィンドウ無し＋実行中／確認待ちでない → 灰色。非表示設定なら隠す
-    const unlinked = isUnlinked(snap!.windowPresence[project.id], state, session?.provider, session?.terminalClosed);
-    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
+    // Orca でスリープ中（261005_4）: 未接続（灰色）の代わりに「スリープ中」と出す。実行中・確認待ちの表示は優先する
+    const sleeping = snap!.sleeping?.[project.id] === true && state !== "running" && state !== "confirm";
+    const unlinked = !sleeping && isUnlinked(snap!.windowPresence[project.id], state, session?.provider, session?.terminalClosed);
+    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${sleeping ? " is-sleeping" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
     if (el.className !== cls) el.className = cls; // 同一値の再代入を避けて発光アニメを継続させる
     const hidden = unlinked && !snap!.config.showUnlinked;
     if (el.hidden !== hidden) el.hidden = hidden;
     if (!hidden) visibleCount += 1;
-    const hint = unlinked ? UNLINKED_HINT[project.clickTarget] : "";
+    const hint = sleeping ? SLEEPING_HINT : unlinked ? UNLINKED_HINT[project.clickTarget] : "";
     if (el.title !== hint) el.title = hint;
     const nameEl = el.querySelector(".tile-name") as HTMLElement;
     const iconEl = el.querySelector(".tile-icon") as HTMLElement;
@@ -455,7 +462,7 @@ function renderGrid(): void {
     taskEl.hidden = task === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
     badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "" && bgText === "";
-    const icon = STATE_META[state].icon;
+    const icon = sleeping ? SLEEPING_ICON : STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）
     const workEl = el.querySelector(".tile-work") as HTMLElement;

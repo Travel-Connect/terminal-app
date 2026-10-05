@@ -190,6 +190,11 @@ export interface Snapshot {
    * renderer は「接続あり」扱いにする（安全側）。未接続の最終判定は renderer の isUnlinked（format.ts）
    */
   windowPresence: Record<string, boolean>;
+  /**
+   * Orca でスリープ中のプロジェクト（261005_4）。key = projectId。Orca 対象で、Orca に登録済みかつ
+   * 生きているターミナルが 0 のとき true。renderer は未接続（灰色）の代わりに「スリープ中」と表示する
+   */
+  sleeping?: Record<string, boolean>;
 }
 
 export interface RegisterResult {

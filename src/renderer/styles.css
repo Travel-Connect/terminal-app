@@ -731,3 +731,11 @@ body {
   user-select: text;
 }
 #orca-instr .instr-text { -webkit-line-clamp: 4; }
+
+/* ---------------- Orca でスリープ中のタイル（261005_4） ---------------- */
+
+.tile.is-sleeping { opacity: 0.62; border-style: dashed; border-color: var(--border); }
+.tile.is-sleeping:hover { opacity: 0.85; }
+.tile.is-sleeping .tile-glow { animation: none; opacity: 0; }
+.tile.is-sleeping .tile-icon,
+.tile.is-sleeping .tile-status { color: var(--text-dim); }

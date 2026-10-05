@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { Project } from "../src/shared/types";
 import {
   isTruncated,
+  orcaSleepingPathSet,
   orcaCodexHome,
   orcaWorktreePathSet,
   parseCliOutput,
@@ -32,6 +33,17 @@ describe("CLI 出力の解釈", () => {
     expect(failed).toMatchObject({ ok: false, code: "selector_not_found" });
     expect(JSON.stringify(failed)).not.toContain("secret");
     expect(parseCliOutput("not json")).toMatchObject({ ok: false, code: "invalid_output" });
+  });
+
+  it("スリープ中 = 登録済みで生きているターミナルが 0 のフォルダ（件数不明の版は含めない。261005_4）", () => {
+    const worktrees = parseWorktrees({
+      worktrees: [
+        { path: "C:/dev/awake", liveTerminalCount: 2, agents: [] },
+        { path: "C:/dev/asleep", liveTerminalCount: 0, agents: [] },
+        { path: "C:/dev/unknown", agents: [] },
+      ],
+    });
+    expect([...orcaSleepingPathSet(worktrees)]).toEqual(["c:\\dev\\asleep"]);
   });
 
   it("一覧の打ち切り（truncated）を検知する", () => {
