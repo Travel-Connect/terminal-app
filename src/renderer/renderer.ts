@@ -80,7 +80,7 @@ const UNLINKED_HINT: Record<ClickTarget, string> = {
 /** 未接続タイルの件数（260903_1）。ステータスバーのトグルラベル用 */
 function countUnlinked(s: Snapshot): number {
   return buildTileSpecs(s).filter(({ project, session }) =>
-    isUnlinked(s.windowPresence[project.id], session?.state, session?.provider)).length;
+    isUnlinked(s.windowPresence[project.id], session?.state, session?.provider, session?.terminalClosed)).length;
 }
 
 function tileStatusText(session: SessionView | undefined): string {
@@ -300,7 +300,7 @@ function autoArrange(): void {
   for (const p of s.projects) {
     const members = s.splitSessions[p.id];
     const sessions = members !== undefined && members.length >= 2 ? members : [s.sessions[p.id]];
-    linked[p.id] = sessions.some((session) => !isUnlinked(s.windowPresence[p.id], session?.state, session?.provider));
+    linked[p.id] = sessions.some((session) => !isUnlinked(s.windowPresence[p.id], session?.state, session?.provider, session?.terminalClosed));
   }
   const ids = s.projects.map((p) => p.id);
   const linkedCount = ids.filter((id) => linked[id]).length;
@@ -379,7 +379,7 @@ function renderGrid(): void {
     tileSessions.set(spec.key, session);
     const state = session === undefined ? "waiting" : session.state;
     // 未接続（260903_1）: 対象アプリのウィンドウ無し＋実行中／確認待ちでない → 灰色。非表示設定なら隠す
-    const unlinked = isUnlinked(snap!.windowPresence[project.id], state, session?.provider);
+    const unlinked = isUnlinked(snap!.windowPresence[project.id], state, session?.provider, session?.terminalClosed);
     const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
     if (el.className !== cls) el.className = cls; // 同一値の再代入を避けて発光アニメを継続させる
     const hidden = unlinked && !snap!.config.showUnlinked;
