@@ -9,6 +9,7 @@ import { execFileSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -36,7 +37,8 @@ fs.writeFileSync(
   )
 );
 // 旧 3 イベント構成の settings.json を用意 → 起動時追補で TaskCreated が append されるはず
-const curl = `curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:${PORT}/terminal-app/event -H "Content-Type: application/json" --data-binary @-`;
+// 既設エントリは今のアプリが書く command で用意する（dist のビルドが前提）
+const curl = createRequire(import.meta.url)(path.join(ROOT, "dist", "main", "hooks-manager.js")).buildHookCommand(PORT);
 const entry = { hooks: [{ type: "command", command: curl, timeout: 5 }] };
 fs.mkdirSync(path.join(projDir, ".claude"), { recursive: true });
 fs.writeFileSync(

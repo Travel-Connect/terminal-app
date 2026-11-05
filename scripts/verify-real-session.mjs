@@ -14,7 +14,7 @@
 //
 // 使い方: npm run build 後に
 //   node scripts/verify-real-session.mjs <出力ディレクトリ> [--port=41999] [--model=haiku]
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -157,18 +157,22 @@ function runClaude(prompt, label) {
 }
 
 /**
- * settings.json へ整備された hook コマンド文字列そのものを cmd 経由で実行し、
- * hooks 実行系と同じく stdin へイベント JSON を流す。戻り値は exit code と所要秒。
+ * settings.json へ整備された hook コマンド文字列そのものを PowerShell 経由で実行し、
+ * hooks 実行系と同じく stdin へイベント JSON を流す。戻り値は exit code・stderr・所要秒。
+ * Claude Code は hook を Git Bash（無ければ PowerShell）で動かし、cmd.exe は使わない（design.md 4.6）。
+ * Git Bash は PATH 上の bash が WSL を指すことがあるため、どの PC にもある powershell.exe で代表させる。
  */
 function runHookCommand(command, payload) {
   const started = Date.now();
-  let code = 0;
-  try {
-    execFileSync("cmd.exe", ["/d", "/s", "/c", command], { input: Buffer.from(JSON.stringify(payload), "utf8"), stdio: ["pipe", "ignore", "ignore"] });
-  } catch (e) {
-    code = e.status ?? -1;
-  }
-  return { code, seconds: Number(((Date.now() - started) / 1000).toFixed(2)) };
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    input: Buffer.from(JSON.stringify(payload), "utf8"),
+    stdio: ["pipe", "ignore", "pipe"],
+  });
+  return {
+    code: r.status ?? -1,
+    stderr: (r.stderr ?? Buffer.alloc(0)).toString("utf8").trim(),
+    seconds: Number(((Date.now() - started) / 1000).toFixed(2)),
+  };
 }
 
 // ---- Phase 1: アプリ起動 → 起動時追補で空 settings.json に 3 イベントの hooks が入る ----
@@ -232,9 +236,9 @@ check(
 log("## Phase 4: アプリ未起動時の無害性（#15 / V-14）");
 const dead = runHookCommand(hookCommand, { hook_event_name: "Stop", session_id: "s-noapp-01", cwd: projectDir });
 check(
-  "アプリ未起動時の実 hook コマンドは短時間で打ち切られ非ブロック（exit != 0・ブロック用 exit 2 でない・5 秒以内）",
-  dead.code !== 0 && dead.code !== 2 && dead.seconds <= 5,
-  `exit=${dead.code} / 所要=${dead.seconds}s（curl -m 2 による打ち切り）`
+  "アプリ未起動時の実 hook コマンドは短時間で正常終了し、エラー表示の元を出さない（exit 0・stderr 空・3 秒以内）",
+  dead.code === 0 && dead.stderr === "" && dead.seconds <= 3,
+  `exit=${dead.code} / 所要=${dead.seconds}s / stderr=${dead.stderr || "(空)"}（--connect-timeout 0.5 で打ち切り、; exit 0 で正常終了）`
 );
 const run2 = await runClaude("Reply with exactly this single word: ok", "claude 実行(アプリ停止中)");
 check("アプリ未起動でも実セッションが完走する（exit 0・エラー表示なし）", run2.code === 0);

@@ -124,17 +124,17 @@ hook コマンドが本リポジトリのパス等（例 `...\dev\terminal-app\s
   "hooks": {
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary '@-'; exit 0",
         "timeout": 5 } ] }
     ],
     "Notification": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary '@-'; exit 0",
         "timeout": 5 } ] }
     ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary '@-'; exit 0",
         "timeout": 5 } ] }
     ]
   }
@@ -150,8 +150,11 @@ hook の stdin には Claude Code が `session_id` / `cwd` / `hook_event_name` /
 2. 読み込み→ JSON パース。**パース失敗時は何も書かずに中断**し、UI にエラー表示（壊れたファイルを上書きしない）。
 3. `settings.json.terminal-app.bak` としてバックアップ（登録操作ごとに上書き）。
 4. `hooks.Stop` / `hooks.Notification` / `hooks.UserPromptSubmit` 配列に対し、マーカー
-   `/terminal-app/event` を command に含むエントリが**無い場合のみ**上記断片のエントリを append する
-   （既存エントリは順序含め変更しない。冪等）。
+   `/terminal-app/event` を command に含む hook が**無い場合のみ**上記断片のエントリを append する
+   （既存エントリは順序含め変更しない。冪等）。自アプリの hook が 1 件あり command だけが古い
+   （ポート変更・形式変更）場合は、その hook の command だけをその場で書き換える（同じグループの
+   他者 hook・timeout などの項目は残す。2026-11-05 改訂）。自アプリの hook が重複している場合は、
+   自アプリの hook だけを取り除いてから 1 件を append する。
 5. 一時ファイルに書き出し → rename でアトミックに置換。
 
 **除去（登録解除時）**
@@ -166,6 +169,7 @@ hook の stdin には Claude Code が `session_id` / `cwd` / `hook_event_name` /
 プロジェクトにも、再登録なしで UserPromptSubmit が行き渡る**（OPEN-04 案 A の既存環境への適用手段）。
 バックアップ・アトミック書き込み・冪等・パース失敗時中断・他者エントリ非破壊は登録時マージと
 同一経路のため同じ保証が効く。ポート変更後の再追記（3.3）もこの経路に含まれる。
+command の形式変更（4.6 の 2026-11-05 採用分）も、この経路で自アプリの hook の command だけが書き換わる。
 
 ### 4.3 イベント → 状態のマッピング表
 
@@ -217,9 +221,15 @@ Stop / Notification だけでは「新しいプロンプトを送って作業が
 - **採用（2026-11-05）**: アプリ停止中は Claude Code が hook の exit 28 を
   「Failed with non-blocking status code: No stderr output」として毎回表示し、Stop・UserPromptSubmit の
   たびに約 2 秒待たされていた（セッション記録で Stop 145 件・UserPromptSubmit 184 件、いずれも exit 28）。
-  そこで command を `curl.exe -s --connect-timeout 0.5 -m 2 ... || exit 0` に変更した。
-  接続できなければ約 0.5 秒で打ち切り、`|| exit 0` で常に正常終了する（Git Bash / cmd / PowerShell 7 で同じ意味）。
-  既存の登録は 4.2 の起動時追補で新 command へ置き換わる。
+  そこで command を `curl.exe -s --connect-timeout 0.5 -m 2 ... --data-binary '@-'; exit 0` に変更した。
+  接続できなければ約 0.5 秒で打ち切り、`; exit 0` で常に正常終了する。
+  Claude Code は hook を Git Bash（無ければ PowerShell）で動かす。この形は Git Bash / PowerShell 7 /
+  Windows PowerShell 5.1 の 3 つで、停止中は exit 0・stderr 空、稼働中は本文が届くことを実測した。
+  素の `@-` と `||` は PowerShell で構文エラー（ParserError）になる（旧 command も PowerShell では動いていなかった）。
+  cmd.exe では `'@-'` と `;` が解釈されないが、Claude Code は hook に cmd.exe を使わない。
+  既存の登録は 4.2 の起動時追補で、自アプリの hook の command だけが新しい形へ書き換わる。
+  見送り: 送れなかったことは終了コードに残らなくなる（停止中と設定誤りを区別できない）。
+  停止中にエラーを出さないことを優先し、配送の確認は検証スクリプト（V-14 は所要時間と exit 0）で行う。
 
 ### 4.7 cwd → プロジェクトの対応付け
 

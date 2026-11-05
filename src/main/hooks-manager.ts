@@ -59,13 +59,15 @@ type SettingsObject = Record<string, unknown>;
 /**
  * design.md 4.1 の hook コマンド文字列を組み立てる。
  * アプリ停止中も Claude Code に「Failed with non-blocking status code: No stderr output」を
- * 出させないため（design.md 4.6）、接続待ちを 0.5 秒で打ち切り、失敗しても `|| exit 0` で正常終了にする。
- * `||` と `exit 0` は Git Bash / cmd / PowerShell 7 のいずれでも同じ意味になる。
+ * 出させないため（design.md 4.6）、接続待ちを 0.5 秒で打ち切り、送れなくても `; exit 0` で正常終了にする。
+ * Claude Code は hook を Git Bash（無ければ PowerShell）で動かす。`'@-'` の引用と `;` は
+ * Git Bash / PowerShell 7 / Windows PowerShell 5.1 のいずれでも同じ意味になる
+ * （素の `@-` と `||` は PowerShell で構文エラーになる。2026-11-05 に 3 つのシェルで実測）。
  */
 export function buildHookCommand(port: number = DEFAULT_PORT): string {
   return (
     `curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:${port}${EVENT_PATH}` +
-    ` -H "Content-Type: application/json" --data-binary @- || exit 0`
+    ` -H "Content-Type: application/json" --data-binary '@-'; exit 0`
   );
 }
 
@@ -105,13 +107,29 @@ export function entryHasMarker(entry: unknown): boolean {
   if (entry === null || typeof entry !== "object") return false;
   const hooks = (entry as HookEntry).hooks;
   if (!Array.isArray(hooks)) return false;
-  return hooks.some(
-    (h) =>
-      h !== null &&
-      typeof h === "object" &&
-      typeof (h as HookCommand).command === "string" &&
-      (h as HookCommand).command.includes(HOOK_MARKER)
+  return hooks.some(isOurHook);
+}
+
+/** hook 1 件が自アプリのもの（command にマーカーを含む）か */
+function isOurHook(h: unknown): boolean {
+  return (
+    h !== null &&
+    typeof h === "object" &&
+    typeof (h as HookCommand).command === "string" &&
+    (h as HookCommand).command.includes(HOOK_MARKER)
   );
+}
+
+/**
+ * エントリから自アプリの hook だけを取り除く（design.md 4.2 除去手順 2）。
+ * 同じグループにある他者の hook や matcher などの項目は残す。hook が 1 つも残らなければ null。
+ * 自アプリの hook を含まないエントリは同じ参照のまま返す（変更の有無の判定に使う）。
+ */
+function withoutOurHooks(entry: unknown): unknown | null {
+  if (!entryHasMarker(entry)) return entry;
+  const e = entry as HookEntry;
+  const kept = (e.hooks as unknown[]).filter((h) => !isOurHook(h));
+  return kept.length === 0 ? null : { ...e, hooks: kept };
 }
 
 /** マーカー付きエントリの command が現在の設定（ポート）と一致するか */
@@ -191,7 +209,8 @@ function backupAndWrite(projectPath: string, settingsPath: string, raw: string |
 /**
  * 登録時のマージ（design.md 4.2 マージ手順）。
  * 冪等: マーカー付きエントリが現在のコマンドと一致して存在する場合は何も書かない。
- * ポート変更時（design.md 3.3）: 旧ポートのマーカー付きエントリを現在のコマンドへ置き換える。
+ * ポート変更・コマンド形式の変更時（design.md 3.3 / 4.6）: 自アプリの hook が 1 件だけなら、
+ * その hook の command だけをその場で書き換える（同じグループの他者 hook・利用者が足した項目は残す）。
  */
 export function mergeHooks(
   projectPath: string,
@@ -226,14 +245,24 @@ export function mergeHooks(
     const arr = Array.isArray(nextHooks[evt]) ? ([...(nextHooks[evt] as unknown[])] as unknown[]) : [];
     const markerEntries = arr.filter((e) => entryHasMarker(e));
     const upToDate = markerEntries.length === 1 && entryMatchesCommand(markerEntries[0], command);
-    if (!upToDate) {
-      // 自アプリ分（旧ポート・重複含む）を除去し、現在のエントリを末尾へ append。
-      // 既存（他者）のエントリは順序含めそのまま維持する。
-      const others = arr.filter((e) => !entryHasMarker(e));
-      others.push(buildHookEntry(port));
-      nextHooks[evt] = others;
-      changed = true;
+    if (upToDate) continue;
+    changed = true;
+    const single = markerEntries.length === 1 ? (markerEntries[0] as HookEntry) : undefined;
+    if (single && (single.hooks as unknown[]).filter(isOurHook).length === 1) {
+      // 旧ポート・旧形式の自アプリ hook 1 件は、その場で command だけ書き換える。
+      // 同じグループの他者 hook や、利用者が足した timeout・matcher などはそのまま残す（NFR-03）
+      arr[arr.indexOf(single)] = {
+        ...single,
+        hooks: (single.hooks as unknown[]).map((h) => (isOurHook(h) ? { ...(h as HookCommand), command } : h)),
+      };
+      nextHooks[evt] = arr;
+      continue;
     }
+    // 未登録、または自アプリ分が重複している → 自アプリの hook だけを取り除き
+    // （他者の hook は順序含めそのまま残す）、現在のエントリを末尾へ append
+    const others = arr.map(withoutOurHooks).filter((e) => e !== null);
+    others.push(buildHookEntry(port));
+    nextHooks[evt] = others;
   }
 
   if (!changed && loaded.exists) {
@@ -335,8 +364,9 @@ export function removeHooks(
   for (const evt of events) {
     const arr = hooks[evt];
     if (!Array.isArray(arr)) continue;
-    const filtered = arr.filter((e) => !entryHasMarker(e));
-    if (filtered.length !== arr.length) {
+    // 自アプリの hook だけを取り除く（同じグループの他者 hook は残す。design.md 4.2 除去手順 2）
+    const filtered = arr.map(withoutOurHooks).filter((e) => e !== null);
+    if (filtered.length !== arr.length || filtered.some((e, i) => e !== arr[i])) {
       changed = true;
       if (filtered.length === 0) {
         delete hooks[evt]; // 空になった配列は削除（痕跡を残さない）
