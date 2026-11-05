@@ -124,17 +124,17 @@ hook コマンドが本リポジトリのパス等（例 `...\dev\terminal-app\s
   "hooks": {
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
         "timeout": 5 } ] }
     ],
     "Notification": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
         "timeout": 5 } ] }
     ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command",
-        "command": "curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @-",
+        "command": "curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H \"Content-Type: application/json\" --data-binary @- || exit 0",
         "timeout": 5 } ] }
     ]
   }
@@ -214,6 +214,12 @@ Stop / Notification だけでは「新しいプロンプトを送って作業が
   `hook-noapp-timeout.log`）。hook コマンドへの採用は挙動変更（command 文字列の変更 → 全登録の
   置き換え）を伴うため今回は見送り、短縮候補として記録する。採用時は 4.2 の起動時追補（マージ）が
   旧 command のマーカー付きエントリを新 command へ自動で置き換えるため、移行手当は不要。
+- **採用（2026-11-05）**: アプリ停止中は Claude Code が hook の exit 28 を
+  「Failed with non-blocking status code: No stderr output」として毎回表示し、Stop・UserPromptSubmit の
+  たびに約 2 秒待たされていた（セッション記録で Stop 145 件・UserPromptSubmit 184 件、いずれも exit 28）。
+  そこで command を `curl.exe -s --connect-timeout 0.5 -m 2 ... || exit 0` に変更した。
+  接続できなければ約 0.5 秒で打ち切り、`|| exit 0` で常に正常終了する（Git Bash / cmd / PowerShell 7 で同じ意味）。
+  既存の登録は 4.2 の起動時追補で新 command へ置き換わる。
 
 ### 4.7 cwd → プロジェクトの対応付け
 

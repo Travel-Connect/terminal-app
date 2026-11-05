@@ -56,11 +56,16 @@ interface HookEntry {
 
 type SettingsObject = Record<string, unknown>;
 
-/** design.md 4.1 の hook コマンド文字列を組み立てる */
+/**
+ * design.md 4.1 の hook コマンド文字列を組み立てる。
+ * アプリ停止中も Claude Code に「Failed with non-blocking status code: No stderr output」を
+ * 出させないため（design.md 4.6）、接続待ちを 0.5 秒で打ち切り、失敗しても `|| exit 0` で正常終了にする。
+ * `||` と `exit 0` は Git Bash / cmd / PowerShell 7 のいずれでも同じ意味になる。
+ */
 export function buildHookCommand(port: number = DEFAULT_PORT): string {
   return (
-    `curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:${port}${EVENT_PATH}` +
-    ` -H "Content-Type: application/json" --data-binary @-`
+    `curl.exe -s --connect-timeout 0.5 -m 2 -o NUL -X POST http://127.0.0.1:${port}${EVENT_PATH}` +
+    ` -H "Content-Type: application/json" --data-binary @- || exit 0`
   );
 }
 
