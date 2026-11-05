@@ -49,7 +49,84 @@ describe("mergeHooks（V-02 / AC-02: 登録時の hooks 自動追記）", () => 
       expect(cmd.command).toContain("terminal-app"); // 識別マーカー（design.md 4.1）
       expect(cmd.command).toContain("http://127.0.0.1:41321/terminal-app/event");
       expect(cmd.command).toContain("-m 2"); // NFR-02: 短タイムアウト
+      expect(cmd.command).toContain("--connect-timeout 0.5"); // design.md 4.6: アプリ停止中の待ちを短縮
+      expect(cmd.command.endsWith("--data-binary '@-'; exit 0")).toBe(true); // design.md 4.6: 停止中もエラー表示を出さない
     }
+  });
+
+  it("旧形式の自アプリ hook は、同じグループの他者 hook と追加の項目を残したまま command だけ書き換える（NFR-03）", () => {
+    const legacy =
+      'curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H "Content-Type: application/json" --data-binary @-';
+    writeSettings(
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              matcher: "",
+              hooks: [
+                { type: "command", command: legacy, timeout: 9, async: true },
+                { type: "command", command: "node notify.js" },
+              ],
+            },
+          ],
+        },
+      })
+    );
+    const result = mergeHooks(dir, 41321, ["Stop"]);
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    const stop = (readSettings().hooks as Record<string, Array<Record<string, unknown>>>).Stop;
+    expect(stop).toEqual([
+      {
+        matcher: "",
+        hooks: [
+          { type: "command", command: buildHookCommand(41321), timeout: 9, async: true },
+          { type: "command", command: "node notify.js" },
+        ],
+      },
+    ]);
+    // 2 回目は書き込み自体が起きない（冪等）
+    expect(mergeHooks(dir, 41321, ["Stop"]).changed).toBe(false);
+  });
+
+  it("自アプリ分が重複していても、同じグループの他者 hook は残して 1 件にまとめる", () => {
+    writeSettings(
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: "command", command: buildHookCommand(41321) }, { type: "command", command: "echo mine" }] },
+            { hooks: [{ type: "command", command: buildHookCommand(50000) }] },
+          ],
+        },
+      })
+    );
+    mergeHooks(dir, 41321, ["Stop"]);
+    const stop = (readSettings().hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>).Stop;
+    expect(stop).toHaveLength(2);
+    expect(stop[0].hooks).toEqual([{ type: "command", command: "echo mine" }]);
+    expect(stop[1].hooks[0].command).toBe(buildHookCommand(41321));
+  });
+
+  it("旧形式（|| exit 0 なし）の自アプリ hook は新しいコマンドへ置き換える（design.md 4.6 の移行）", () => {
+    const legacy =
+      'curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:41321/terminal-app/event -H "Content-Type: application/json" --data-binary @-';
+    writeSettings(
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: "command", command: "echo existing-dummy" }] },
+            { hooks: [{ type: "command", command: legacy, timeout: 5 }] },
+          ],
+        },
+      })
+    );
+    const result = mergeHooks(dir, 41321, ["Stop"]);
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    const stop = (readSettings().hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>).Stop;
+    expect(stop).toHaveLength(2);
+    expect(stop[0].hooks[0].command).toBe("echo existing-dummy"); // 他者の hook はそのまま
+    expect(stop[1].hooks[0].command).toBe(buildHookCommand(41321));
   });
 
   it("既存 hooks・他の設定キーを一切変更せずに追記する（V-02 手順3(b) / NFR-03）", () => {
@@ -166,5 +243,21 @@ describe("removeHooks（V-03 / AC-03: 登録解除で自アプリ分のみ除去
     expect(result.ok).toBe(true);
     expect(result.changed).toBe(false);
     expect(readSettings()).toEqual(original);
+  });
+
+  it("同じグループに他者の hook があれば、自アプリの hook だけを取り除く（design.md 4.2 除去手順 2）", () => {
+    writeSettings(
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { matcher: "", hooks: [{ type: "command", command: buildHookCommand(41321) }, { type: "command", command: "echo mine" }] },
+          ],
+        },
+      })
+    );
+    const result = removeHooks(dir, ["Stop"]);
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(readSettings()).toEqual({ hooks: { Stop: [{ matcher: "", hooks: [{ type: "command", command: "echo mine" }] }] } });
   });
 });

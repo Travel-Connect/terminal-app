@@ -21,9 +21,9 @@ mkdirSync(outDir, { recursive: true });
 const electronPath = require("electron");
 const resultLog = join(outDir, "upgrade-results.log");
 const PORT = 41321;
-const HOOK_COMMAND =
-  `curl.exe -s -m 2 -o NUL -X POST http://127.0.0.1:${PORT}/terminal-app/event` +
-  ` -H "Content-Type: application/json" --data-binary @-`;
+// 既設エントリは今のアプリが書く command で用意する（検証したいのはイベント構成の追補。
+// command 形式の書き換えは単体テスト tests/hooks-manager.test.ts で確かめる）。dist のビルドが前提
+const HOOK_COMMAND = require(join(root, "dist", "main", "hooks-manager.js")).buildHookCommand(PORT);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
